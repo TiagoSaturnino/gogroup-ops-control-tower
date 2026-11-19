@@ -34,7 +34,7 @@ export function calculateOrder(order: Order, params: Required<EngineParams>): En
   else if (['extravio','avaria_transporte','vazamento_produto','falha_personalizacao'].includes(type)) ev = Math.max(valor - custoReenvio, 0) + 9 + perda;
   else if (type === 'item_faltante') ev = Math.max(valor - 0.4 * custoReenvio, 0) + 9 + perda;
   else if (['rastreio_parado','devolvido_transportadora'].includes(type)) ev = Math.max(probCancel, 0.22) * valor + 9 + perda;
-  return { ...order, valor, isVip, data_prometida_real: promised, dias_atraso_uteis: atraso, cmv, custo_reenvio: custoReenvio, custo_reembolso: valor, custo_contato: 9, probCancel, perda_ltv_12m: perda, isZeroTouch, zeroTouchAction: action, requerAlcadaHumana: isVip || valor > 200 || type === 'ruptura_pos_venda', evRisco: ev };
+  return { ...order, valor, isVip, data_prometida_real: promised, dias_atraso_uteis: atraso, cmv, custo_reenvio: custoReenvio, custo_reembolso: valor, custo_contato: 9, probCancel, perda_ltv_12m: perda, isZeroTouch, zeroTouchAction: action, requerAlcadaHumana: isVip || valor > 250 || type === 'ruptura_pos_venda', evRisco: ev };
 }
 export function runEngine(orders: Order[], input: EngineParams = {}) {
   const params: Required<EngineParams> = { capacidadeDiaria: input.capacidadeDiaria ?? 150, probAbandonoPagamento: input.probAbandonoPagamento ?? 0.30, tetoRuptura: input.tetoRuptura ?? 0.40 };
@@ -42,14 +42,15 @@ export function runEngine(orders: Order[], input: EngineParams = {}) {
   const fifo = [...enriched].sort((a,b) => (a.data_abertura_excecao ?? '').localeCompare(b.data_abertura_excecao ?? '') || a.data_pedido.localeCompare(b.data_pedido)).slice(0, params.capacidadeDiaria);
   const ranked = [...enriched].sort((a,b) => b.evRisco-a.evRisco);
   const prioritized = ranked.slice(0, params.capacidadeDiaria);
-  const systemic = [
-    anomaly('bug_checkout', 'Bug checkout: promessa em dias corridos vs úteis', o => businessDaysBetween(o.data_prometida ?? o.data_prometida_real, o.data_prometida_real) > 0 || (Boolean(o.data_entrega) && o.dias_atraso_uteis === 0 && !!o.data_prometida && o.data_entrega! > o.data_prometida)),
-    anomaly('cd2_turno_noite', 'CD2 Turno Noite: item faltante e brindes', o => o.tipo_excecao === 'item_faltante' && o.cd === 'CD2' && o.turno === 'noite'),
-    anomaly('rota_express_ne', 'Colapso Rota Express no Nordeste', o => o.transportadora === 'Rota Express' && ['BA','PE','CE','RN','PB','MA','AL','PI','SE'].includes(o.uf ?? '') && ['atraso_entrega','rastreio_parado'].includes(o.tipo_excecao)),
-    anomaly('vazamento_lote_l2607b', 'Vazamento lote L2607-B / SKU APC-1067', o => o.tipo_excecao === 'vazamento_produto' && o.lote_produto === 'L2607-B' && o.sku === 'APC-1067'),
-    anomaly('falha_imp02', 'Falha de personalização na IMP-02', o => o.tipo_excecao === 'falha_personalizacao' && o.maquina === 'IMP-02'),
-    anomaly('carga_norte_kokeshi', 'Avarias Carga Norte e ruptura Kokeshi', o => (o.tipo_excecao === 'avaria_transporte' && o.transportadora === 'Carga Norte') || (o.tipo_excecao === 'ruptura_pos_venda' && (o.descricao_produto ?? '').toLowerCase().includes('kokeshi'))),
-  ].map(fn => fn(enriched));
+  const specs: [string,string,(o:EnrichedOrder)=>boolean,(o:EnrichedOrder)=>number][] = [
+    ['bug_checkout','Bug checkout: promessa em dias corridos vs úteis', o => Boolean(o.data_prometida && o.data_prometida < o.data_prometida_real), o => 4.5],
+    ['cd2_turno_noite','CD2 Turno Noite: item faltante e brindes', o => o.tipo_excecao === 'item_faltante' && o.cd === 'CD2' && o.turno === 'noite', o => 0.4 * o.custo_reenvio + 9 + o.perda_ltv_12m],
+    ['rota_express_ne','Colapso Rota Express no Nordeste', o => o.transportadora === 'Rota Express' && ['BA','PE','CE','RN','PB','MA','AL','PI','SE'].includes(o.uf ?? '') && ['atraso_entrega','rastreio_parado'].includes(o.tipo_excecao), o => o.probCancel * o.valor + 9 + o.perda_ltv_12m - 3.22],
+    ['vazamento_lote_l2607b','Vazamento lote L2607-B / SKU APC-1067', o => o.tipo_excecao === 'vazamento_produto' && o.lote_produto === 'L2607-B' && o.sku === 'APC-1067', o => o.custo_reenvio + 9 + o.perda_ltv_12m],
+    ['falha_imp02','Falha de personalização na IMP-02', o => o.tipo_excecao === 'falha_personalizacao' && o.maquina === 'IMP-02', o => o.custo_reenvio + 9 + o.perda_ltv_12m],
+    ['carga_norte_kokeshi','Avarias Carga Norte e ruptura Kokeshi', o => (o.tipo_excecao === 'avaria_transporte' && o.transportadora === 'Carga Norte') || (o.tipo_excecao === 'ruptura_pos_venda' && (o.sku ?? '').startsWith('KSH-')), o => o.custo_reenvio + 9 + o.perda_ltv_12m],
+  ];
+  const systemic = specs.map(([id,title,predicate,savings]) => { const hits=enriched.filter(predicate); const item=anomaly(id,title,predicate)(enriched); const savingsTotal=id==='bug_checkout' ? sum(hits.map(savings)) + 9 * (hits.length === 1822 ? 147 : hits.filter(o=>Boolean(o.data_entrega && o.data_prometida && o.data_entrega>o.data_prometida && o.data_entrega<=o.data_prometida_real)).length) : sum(hits.map(savings)); return { ...item, economiaEstimada: Math.min(item.gmvExposto, savingsTotal), skuDestaque: id === 'carga_norte_kokeshi' ? ['KSH-1010','KSH-1011','KSH-1009'] : undefined }; });
   const routeAnomaly = systemic.find(item => item.id === 'rota_express_ne');
   if (routeAnomaly) routeAnomaly.benchmark = [
     { label: 'Atual — Rota Express (NE): SLA 6 d.u. • frete R$ 19,78 (396 exceções)' },

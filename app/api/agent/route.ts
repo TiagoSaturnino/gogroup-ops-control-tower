@@ -1,4 +1,4 @@
-﻿import Groq from 'groq-sdk';
+import Groq from 'groq-sdk';
 import { NextResponse } from 'next/server';
 import { dashboard, executeDeterministic, loadDataset } from '@/lib/tools';
 const tools=[
@@ -17,7 +17,7 @@ export async function POST(request:Request) {
   let response;
   try { response=await client.chat.completions.create({model,messages:[{role:'system',content:`VocÃª Ã© agente operacional. Use uma ferramenta apropriada. NÃ£o invente valores financeiros ou prazos. Contexto determinÃ­stico: ${JSON.stringify({totals:context.totals,systemic:context.systemic.map(({id,title,count,gmvExposto,economiaEstimada})=>({id,title,count,gmvExposto,economiaEstimada}))})}`},{role:'user',content:body.message??body.prompt??'Priorize os casos elegÃ­veis para automaÃ§Ã£o.'}],tools:[...tools],tool_choice:'auto'}); }
   catch {model='llama-3.1-8b-instant'; response=await client.chat.completions.create({model,messages:[{role:'system',content:`Use ferramenta apropriada. Contexto: ${JSON.stringify(context.totals)}`},{role:'user',content:body.message??body.prompt??'Priorize os casos Zero-Touch.'}],tools:[...tools],tool_choice:'auto'});}
-  const call=response.choices[0]?.message.tool_calls?.[0]; if(!call)return NextResponse.json({...executeDeterministic('executar_lote_zero_touch',{categoria:'todos'},dataset),justification:response.choices[0]?.message.content??'AÃ§Ã£o calculada deterministicamente.',modelUsed:model});
+  const call=response.choices[0]?.message.tool_calls?.[0]; if(!call)return NextResponse.json({...executeDeterministic('executar_lote_zero_touch',{categoria:'todos'},dataset),modelUsed:model});
   const args=JSON.parse(call.function.arguments) as Record<string,unknown>; const result=executeDeterministic(call.function.name,args,dataset); return NextResponse.json({...result,modelUsed:model});
  } catch { return fallback(); }
 }

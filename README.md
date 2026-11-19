@@ -90,7 +90,7 @@ O motor TypeScript calcula **100% dos valores financeiros e prazos**. O LLM não
 | Situação | Regra de governança |
 | --- | --- |
 | Cliente VIP | `LTV > R$ 1.500`: requer alçada humana. |
-| Reembolso / pedido de alto valor | Valor acima de **R$ 200**: requer alçada humana. |
+| Reembolso / pedido de alto valor | Valor acima de **R$ 250**: requer alçada humana. |
 | `ruptura_pos_venda` | Requer alçada humana, independentemente do valor. |
 | Ações estruturais ou sistêmicas | Requerem validação do responsável operacional. |
 | Ações executadas pelo agente | Permanecem sujeitas às travas determinísticas; decisões não aprovadas não são executadas externamente. |
