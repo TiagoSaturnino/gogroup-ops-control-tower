@@ -1,0 +1,210 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Papa from "papaparse";
+import {
+  Activity, AlertTriangle, ArrowDownToLine, ArrowRight, BadgeCheck, Bot, Check, ChevronDown,
+  ChevronLeft, ChevronRight, Clipboard, Clock3, FileUp, Filter, LoaderCircle, Search, ShieldCheck,
+  Sparkles, Upload, Users, Wallet, X,
+} from "lucide-react";
+import {
+  Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts";
+import type { Order } from "@/lib/engine";
+import type { Dataset } from "@/lib/tools";
+
+type Dashboard = ReturnType<typeof import("@/lib/engine").runEngine>;
+type Enriched = Dashboard["orders"][number];
+type AgentResult = {
+  actionExecuted: string; toolName: string; requiresHumanApproval: boolean; approvalReason: string;
+  financialImpactBrl: number; hoursSaved: number; justification: string; customerMessageDraft: string; modelUsed: string;
+};
+type AuditItem = AgentResult & { id: string; timestamp: string; status: "Pendente" | "Aprovada" | "Rejeitada" };
+type Source = "snapshot" | "csv";
+const money = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
+const integer = (value: number) => new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(value || 0);
+const percent = (value: number) => `${(value * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+const friendly: Record<string, string> = {
+  atraso_entrega: "Atraso na entrega", pagamento_pendente: "Pagamento pendente", endereco_divergente: "Endereço divergente",
+  ruptura_pos_venda: "Ruptura pós-venda", item_faltante: "Item faltante", rastreio_parado: "Rastreio parado",
+  devolvido_transportadora: "Devolvido pela transportadora", extravio: "Extravio", avaria_transporte: "Avaria no transporte",
+  vazamento_produto: "Vazamento de produto", falha_personalizacao: "Falha de personalização",
+};
+const actionPlan: Record<string, string> = {
+  bug_checkout: "Corrigir o cálculo do prazo no checkout e revisar a comunicação dos pedidos impactados.",
+  cd2_turno_noite: "Auditar a conferência dos brindes e reforçar a checagem de itens no turno da noite.",
+  rota_express_ne: "Revisar capacidade e SLA da rota Nordeste; avaliar redistribuição para transportadoras alternativas.",
+  vazamento_lote_l2607b: "Bloquear preventivamente o lote e inspecionar unidades do SKU afetado.",
+  falha_imp02: "Calibrar a IMP-02 e inspecionar os pedidos personalizados da fila.",
+  carga_norte_kokeshi: "Abrir análise de acondicionamento com a transportadora e revisar disponibilidade de Kokeshi.",
+};
+const statuses = { em_analise: 1, aberta: 2, aguardando_transportadora: 3, aguardando_cliente: 4 };
+const suggestions = ["Executar auto-encerramento dos atrasos já entregues", "Diagnosticar e bloquear lote L2607-B", "Resolver maior risco VIP da fila"];
+
+export function ControlTower() {
+  const [data, setData] = useState<Dashboard | null>(null);
+  const [source, setSource] = useState<Source>("snapshot");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [capacity, setCapacity] = useState(150);
+  const [abandonment, setAbandonment] = useState(30);
+  const [rupture, setRupture] = useState(40);
+  const [filter, setFilter] = useState("fila");
+  const [typeFilter, setTypeFilter] = useState("todos");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [agentPrompt, setAgentPrompt] = useState("");
+  const [selected, setSelected] = useState<Enriched | null>(null);
+  const [lastAction, setLastAction] = useState<AuditItem | null>(null);
+  const [audit, setAudit] = useState<AuditItem[]>([]);
+  const [toast, setToast] = useState("");
+  const [zeroRun, setZeroRun] = useState(false);
+
+  const load = useCallback(async (params?: { capacidade?: number; probAbandono?: number; tetoRuptura?: number }) => {
+    setLoading(true);
+    try {
+      const query = new URLSearchParams(Object.entries(params ?? {}).map(([key, value]) => [key, String(value)]));
+      const response = await fetch(`/api/operations${query.size ? `?${query}` : ""}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Não foi possível carregar a operação.");
+      setData(await response.json() as Dashboard);
+    } catch (error) { setToast(error instanceof Error ? error.message : "Falha ao carregar os dados."); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const rows = useMemo(() => {
+    if (!data) return [];
+    return data.rankedOrders.filter((order) => {
+      const matchesTab = filter === "fila" ? data.rankedOrders.slice(0, data.params.capacidadeDiaria).some((row) => row.order_id === order.order_id)
+        : filter === "zero" ? order.isZeroTouch : filter === "alcada" ? order.requerAlcadaHumana
+          : filter === "vip" ? order.isVip : true;
+      const matchesType = typeFilter === "todos" || order.tipo_excecao === typeFilter;
+      const text = `${order.order_id} ${order.sku ?? ""} ${order.descricao_produto ?? ""}`.toLocaleLowerCase("pt-BR");
+      return matchesTab && matchesType && text.includes(search.toLocaleLowerCase("pt-BR"));
+    });
+  }, [data, filter, search, typeFilter]);
+  const pages = Math.max(1, Math.ceil(rows.length / 25));
+  const currentRows = rows.slice((page - 1) * 25, page * 25);
+  useEffect(() => { setPage(1); }, [filter, search, typeFilter]);
+
+  const callAgent = async (message: string, opts?: { row?: Enriched; anomalyId?: string; zeroTouch?: boolean }) => {
+    setBusy(true); setAgentPrompt(message);
+    try {
+      const response = await fetch("/api/agent", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
+      if (!response.ok) throw new Error("O agente não conseguiu processar a solicitação.");
+      const result = await response.json() as AgentResult;
+      const entry: AuditItem = { ...result, id: crypto.randomUUID(), timestamp: new Date().toLocaleString("pt-BR"), status: result.requiresHumanApproval ? "Pendente" : "Aprovada" };
+      setLastAction(entry); setAudit((items) => [entry, ...items]);
+      if (opts?.row) setSelected(opts.row);
+      if (opts?.zeroTouch) setZeroRun(true);
+      setToast(result.requiresHumanApproval ? "Ação aguardando alçada humana." : "Ação registrada na trilha da sessão.");
+    } catch (error) { setToast(error instanceof Error ? error.message : "Falha ao acionar o agente."); }
+    finally { setBusy(false); }
+  };
+  const updateAuditStatus = (id: string, status: "Aprovada" | "Rejeitada") => {
+    setAudit((items) => items.map((item) => item.id === id ? { ...item, status } : item));
+    setLastAction((item) => item?.id === id ? { ...item, status } : item);
+    setToast(status === "Aprovada" ? "Aprovação registrada nesta sessão." : "Rejeição registrada nesta sessão.");
+  };
+  const loadCsv = async (files: FileList | null) => {
+    if (!files || files.length < 3) { setToast("Selecione os três arquivos CSV para recalcular a operação."); return; }
+    setBusy(true);
+    try {
+      const byName = new Map(Array.from(files).map((file) => [file.name.toLocaleLowerCase("pt-BR"), file]));
+      const fileFor = (part: string) => [...byName].find(([name]) => name.includes(part))?.[1];
+      const [ordersFile, clientsFile, carriersFile] = [fileFor("pedidos_excecao"), fileFor("clientes"), fileFor("transportadoras")];
+      if (!ordersFile || !clientsFile || !carriersFile) throw new Error("Os arquivos devem ser pedidos_excecao.csv, clientes.csv e transportadoras.csv.");
+      const [orderRows, clientRows, carrierRows] = await Promise.all([ordersFile, clientsFile, carriersFile].map(async (file) => Papa.parse<Record<string, string>>(await file.text(), { header: true, skipEmptyLines: true }).data));
+      const clients = new Map(clientRows.map((client) => [client.customer_id, client]));
+      const carriers = new Map(carrierRows.map((carrier) => [`${carrier.transportadora}|${carrier.uf_atendida}`, carrier]));
+      const deduped = new Map<string, Record<string, string>>();
+      orderRows.forEach((order) => { const old = deduped.get(order.order_id); if (!old || (statuses[order.status as keyof typeof statuses] ?? 0) > (statuses[old.status as keyof typeof statuses] ?? 0)) deduped.set(order.order_id, order); });
+      const prefixCounts: Record<string, number> = {};
+      const converted: Order[] = [...deduped.values()].sort((a, b) => a.order_id.localeCompare(b.order_id)).map((order) => {
+        const prefix = order.order_id.startsWith("GC") ? "GC" : "GB";
+        prefixCounts[prefix] = (prefixCounts[prefix] ?? 0) + 1;
+        const customer = clients.get(order.customer_id) ?? {};
+        const route = carriers.get(`${order.transportadora}|${order.uf}`) ?? {};
+        let hash = 0; for (const char of order.customer_id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+        return { ...order, order_id: `${prefix}-${String(prefixCounts[prefix]).padStart(4, "0")}`, customer_id: `CLI-${(hash % 10000).toString().padStart(4, "0")}`,
+          n_pedidos: Number(customer.n_pedidos ?? 1), receita_acumulada: Number(customer.receita_acumulada ?? 0), n_contatos_atendimento: Number(customer.n_contatos_atendimento ?? 0),
+          uf_atendida: order.uf, sla_contratado_dias_uteis: Number(route.sla_contratado_dias_uteis ?? 0), custo_medio_frete: Number(route.custo_medio_frete ?? 0) } as unknown as Order;
+      });
+      const response = await fetch("/api/operations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orders: converted }) });
+      if (!response.ok) throw new Error("Falha ao recalcular o lote CSV.");
+      setData(await response.json() as Dashboard); setSource("csv"); setUploadOpen(false); setFilter("fila"); setPage(1); setToast(`${converted.length.toLocaleString("pt-BR")} pedidos recalculados somente nesta sessão.`);
+    } catch (error) { setToast(error instanceof Error ? error.message : "Não foi possível ler os arquivos."); }
+    finally { setBusy(false); }
+  };
+
+  const sessionImpact = audit.filter((item) => item.status === "Aprovada").reduce((sum, item) => sum + item.financialImpactBrl, 0);
+  const sessionHours = audit.filter((item) => item.status === "Aprovada").reduce((sum, item) => sum + item.hoursSaved, 0);
+  const pendingCount = audit.filter((item) => item.status === "Pendente").length;
+  const deliveredLateCount = data?.orders.filter((order) => order.tipo_excecao === "atraso_entrega" && order.data_entrega).length ?? 0;
+
+  return <main className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
+      <header className="mb-6 flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-start gap-4"><div className="rounded-xl bg-[#0052FF] p-3 text-white"><Activity size={24}/></div><div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#0052FF]">GoGroup • Operações</p><h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">Torre de Controle AI-First</h1><p className="mt-1 text-sm text-slate-500">Operações Gocase &amp; GoBeauté <span className="mx-1 text-slate-300">•</span> Referência 30/09/2026</p></div></div>
+        <div className="flex flex-wrap items-center gap-3"><span className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold ${source === "snapshot" ? "border-blue-200 bg-blue-50 text-blue-800" : "border-violet-200 bg-violet-50 text-violet-800"}`}><span className="h-2 w-2 rounded-full bg-current"/>{source === "snapshot" ? "Snapshot Real Anonimizado (2.000 pedidos únicos)" : "Lote CSV Carregado na Sessão"}</span><button onClick={() => setUploadOpen(true)} className="inline-flex items-center gap-2 rounded-lg bg-[#0052FF] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700"><Upload size={16}/>Carregar Novos CSVs</button></div>
+      </header>
+
+      <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-4 flex items-center justify-between"><div><h2 className="font-semibold">Premissas &amp; simulador de cenário</h2><p className="text-xs text-slate-500">Ajuste a operação e recalcule o motor determinístico.</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">Valores padrão do motor</span></div>
+        <div className="grid gap-4 md:grid-cols-4 md:items-end">
+          <label className="block"><span className="mb-1.5 block text-xs font-semibold text-slate-600">Capacidade diária do time</span><div className="relative"><input type="number" min={1} value={capacity} onChange={(e) => setCapacity(Number(e.target.value))} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 pr-16 text-sm outline-none focus:border-[#0052FF]"/><span className="absolute right-3 top-2.5 text-xs text-slate-400">tratativas</span></div></label>
+          <label className="block"><span className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-slate-600">Taxa de abandono — pagamento pendente <small className="rounded bg-blue-50 px-1.5 py-0.5 font-medium text-blue-700">Premissa editável</small></span><div className="relative"><input type="number" min={0} max={100} value={abandonment} onChange={(e) => setAbandonment(Number(e.target.value))} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#0052FF]"/><span className="absolute right-3 top-2.5 text-xs text-slate-400">%</span></div></label>
+          <label className="block"><span className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-slate-600">Cancelamento em ruptura pós-venda <small className="rounded bg-amber-50 px-1.5 py-0.5 font-medium text-amber-800">Teto tabela oficial</small></span><div className="relative"><input type="number" min={0} max={100} value={rupture} onChange={(e) => setRupture(Number(e.target.value))} className="w-full rounded-lg border border-slate-300 px-3 py-2.5 pr-10 text-sm outline-none focus:border-[#0052FF]"/><span className="absolute right-3 top-2.5 text-xs text-slate-400">%</span></div></label>
+          <button disabled={loading} onClick={() => void load({ capacidade: capacity, probAbandono: abandonment / 100, tetoRuptura: rupture / 100 })} className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"><Activity size={16}/>Recalcular Cenário</button>
+        </div>
+      </section>
+
+      {loading && !data ? <div className="flex min-h-72 items-center justify-center text-slate-500"><LoaderCircle className="mr-2 animate-spin"/>Carregando operação...</div> : data && <>
+        <section className="mb-8">
+          <div className="mb-3 flex items-end justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-[#0052FF]">01 • Caixa e capacidade</p><h2 className="text-xl font-bold">Visão executiva da operação</h2></div><p className="hidden text-xs text-slate-500 sm:block">Base recalculada pelo motor TypeScript</p></div>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Kpi icon={<Wallet size={19}/>} color="blue" title="Exposição financeira total" value={money(data.totals.gmv)} detail={`${money(data.totals.evRisco)} em EV_Risco estimado`} foot={`${integer(data.totals.pedidos)} pedidos • LTV 12m em risco calculado por pedido`} />
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Automação Zero-Touch</span><span className="rounded-lg bg-emerald-50 p-2 text-emerald-700"><Sparkles size={18}/></span></div><strong className="text-2xl font-bold">{integer(data.totals.zeroTouch)} <small className="text-base font-semibold text-emerald-700">({percent(data.totals.zeroTouch / Math.max(1, data.totals.pedidos))})</small></strong><p className="mt-1 text-sm text-slate-600">{data.totals.zeroTouchHoursSaved.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}h humanas liberadas <span className="text-slate-400">({(data.totals.zeroTouch / data.params.capacidadeDiaria).toFixed(2)} dias de capacidade da equipe)</span></p><button disabled={busy || zeroRun} onClick={() => void callAgent("Executar lote Zero-Touch para todos os casos elegíveis", { zeroTouch: true })} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"><Bot size={16}/>{zeroRun ? "Lote registrado na sessão" : "Executar Lote Zero-Touch"}</button></div>
+            <Kpi icon={<ArrowDownToLine size={19}/>} color="violet" title={`Ganho Dia 1 • Top ${data.params.capacidadeDiaria}`} value={`${money(data.comparison.aiFirst.gmvCovered)} vs ${money(data.comparison.fifo.gmvCovered)}`} detail={`GMV coberto AI-First vs FIFO • ${change(data.comparison.aiFirst.gmvCovered, data.comparison.fifo.gmvCovered)}`} foot={`EV protegido ${money(data.comparison.aiFirst.evRiscoProtected)} vs ${money(data.comparison.fifo.evRiscoProtected)} • ${change(data.comparison.aiFirst.evRiscoProtected, data.comparison.fifo.evRiscoProtected)}. AI-First: ${integer(data.comparison.aiFirst.vipsAttended)} VIPs vs. FIFO: ${integer(data.comparison.fifo.vipsAttended)} VIPs • 32 slots já entregues evitados`} />
+            <Kpi icon={<ShieldCheck size={19}/>} color="amber" title="Impacto executado na sessão" value={money(sessionImpact)} detail={`${sessionHours.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} horas liberadas`} foot={`${audit.length} ações registradas • ${pendingCount} pendentes de alçada`} />
+          </div>
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-4 flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-semibold">Fila FIFO vs. Priorização AI-First</h3><p className="text-xs text-slate-500">Comparativo do mesmo limite de capacidade, calculado pelo motor</p></div><span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">AI-First: {integer(data.comparison.aiFirst.vipsAttended)} VIPs vs. FIFO: {integer(data.comparison.fifo.vipsAttended)} VIPs • 32 slots já entregues evitados</span></div><div className="h-72 w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={[{ name: "GMV coberto (R$)", FIFO: data.comparison.fifo.gmvCovered, "AI-First": data.comparison.aiFirst.gmvCovered }, { name: "EV_Risco protegido (R$)", FIFO: data.comparison.fifo.evRiscoProtected, "AI-First": data.comparison.aiFirst.evRiscoProtected }]} margin={{ top: 12, right: 10, left: 14, bottom: 4 }}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={(value: number) => value > 999 ? `${(value / 1000).toFixed(0)}k` : String(value)}/><Tooltip formatter={(value) => money(Number(value))}/><Legend/><Bar dataKey="FIFO" fill="#94A3B8" radius={[5,5,0,0]}/><Bar dataKey="AI-First" fill="#0052FF" radius={[5,5,0,0]}/></BarChart></ResponsiveContainer></div><p className="mt-2 text-xs text-slate-500">Zero-Touch: {integer(data.totals.zeroTouch)} casos podem ser automatizados; {deliveredLateCount} pedidos de atraso já entregues identificados no conjunto.</p></div>
+        </section>
+
+        <section className="mb-8" id="fila">
+          <div className="mb-3 flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><p className="text-xs font-bold uppercase tracking-widest text-[#0052FF]">02 • Execução assistida</p><h2 className="text-xl font-bold">Fila prioritária por EV_Risco</h2></div><div className="flex flex-wrap gap-2"><div className="relative"><Search className="absolute left-3 top-2.5 text-slate-400" size={15}/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar pedido ou SKU" className="w-48 rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs outline-none focus:border-[#0052FF]"/></div><div className="relative"><Filter className="absolute left-3 top-2.5 text-slate-400" size={15}/><select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="appearance-none rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-8 text-xs outline-none focus:border-[#0052FF]"><option value="todos">Todos os tipos</option>{[...new Set(data.orders.map((row) => row.tipo_excecao))].sort().map((type) => <option key={type} value={type}>{friendly[type] ?? type}</option>)}</select><ChevronDown className="pointer-events-none absolute right-2 top-2.5 text-slate-400" size={14}/></div></div></div>
+          <div className="mb-3 flex gap-2 overflow-x-auto pb-1">{[["fila",`Top ${data.params.capacidadeDiaria} Fila Humana (Dia 1)`],["todos",`Todos os Pedidos (${integer(data.totals.pedidos)})`],["zero",`Zero-Touch (${integer(data.totals.zeroTouch)})`],["alcada","Alçada Humana Obrigatória"],["vip","Clientes VIP (> R$ 1.500)"]].map(([key,label])=><button key={key} onClick={()=>setFilter(key)} className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold ${filter===key?"bg-[#0052FF] text-white":"border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"}`}>{label}</button>)}</div>
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"><div className="overflow-x-auto"><table className="w-full min-w-[1150px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-3"># / Pedido</th><th className="px-3 py-3">Marca &amp; produto</th><th className="px-3 py-3">Exceção / Status</th><th className="px-3 py-3">Atraso real</th><th className="px-3 py-3 text-right">Valor</th><th className="px-3 py-3 text-right">EV_Risco</th><th className="px-3 py-3">Governança</th><th className="px-3 py-3">Ação</th></tr></thead><tbody className="divide-y divide-slate-100">{currentRows.map((row,index)=><OrderRow key={row.order_id} row={row} position={(page-1)*25+index+1} onResolve={()=>void callAgent(`Resolver pedido ${row.order_id}. Ação recomendada: ${row.zeroTouchAction ?? "avaliar a exceção e preparar a resolução respeitando a alçada"}.`,{row})} busy={busy} state={audit.find((item)=>item.actionExecuted.includes(row.order_id))?.status}/>)}</tbody></table></div><div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500"><span>{integer(rows.length)} pedidos encontrados • página {page} de {pages}</span><div className="flex gap-1"><button disabled={page<=1} onClick={()=>setPage((p)=>p-1)} aria-label="Página anterior" className="rounded border border-slate-200 p-1.5 disabled:opacity-40"><ChevronLeft size={15}/></button><button disabled={page>=pages} onClick={()=>setPage((p)=>p+1)} aria-label="Próxima página" className="rounded border border-slate-200 p-1.5 disabled:opacity-40"><ChevronRight size={15}/></button></div></div></div>
+        </section>
+
+        <section className="mb-8" id="causas">
+          <div className="mb-3"><p className="text-xs font-bold uppercase tracking-widest text-[#0052FF]">03 • Ações estruturais</p><h2 className="text-xl font-bold">Radar das causas-raiz sistêmicas</h2><p className="text-sm text-slate-500">Concentrações calculadas sobre os dados carregados pelo motor.</p></div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{data.systemic.map((item)=><article key={item.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-3 flex items-start justify-between gap-3"><div className="rounded-lg bg-amber-50 p-2 text-amber-700"><AlertTriangle size={18}/></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-700">{integer(item.count)} pedidos</span></div><h3 className="font-semibold leading-snug">{item.title}</h3><p className="mt-1 text-sm text-slate-500">GMV exposto <strong className="text-slate-800">{money(item.gmvExposto)}</strong></p><div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600"><span className="font-semibold text-slate-800">Ação recomendada:</span> {actionPlan[item.id] ?? "Investigar concentração e definir ação corretiva."}{item.id === "cd2_turno_noite" && <p className="mt-1">Pedidos com brinde: <strong>{integer(item.brindes)}</strong></p>}{item.id === "rota_express_ne" && item.benchmark?.length ? <div className="mt-2 flex flex-wrap gap-2">{item.benchmark.slice(0, 3).map((route,idx)=><span key={`${route.label}-${idx}`} className="rounded bg-white px-2 py-1 text-[10px]">{route.label}</span>)}</div> : null}</div><div className="mt-4 flex items-center justify-between"><span className="text-xs text-slate-500">Economia estimada <strong className="text-emerald-700">{money(item.economiaEstimada)}</strong></span><button onClick={()=>void callAgent(`Aplicar ação sistêmica para anomalia ${item.id}: ${item.title}.`,{anomalyId:item.id})} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-[#0052FF]/20 px-3 py-2 text-xs font-semibold text-[#0052FF] hover:bg-blue-50 disabled:opacity-50">Acionar Plano com Agente<ArrowRight size={13}/></button></div></article>)}</div>
+        </section>
+
+        <section id="agente" className="mb-6 grid gap-4 xl:grid-cols-[1.05fr_.95fr]">
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-4 flex items-center gap-3"><div className="rounded-lg bg-blue-50 p-2 text-[#0052FF]"><Bot size={21}/></div><div><p className="text-xs font-bold uppercase tracking-widest text-[#0052FF]">04 • Agente executor</p><h2 className="font-bold">Comando operacional</h2></div></div><form onSubmit={(e)=>{e.preventDefault();if(agentPrompt.trim())void callAgent(agentPrompt.trim());}} className="flex gap-2"><input value={agentPrompt} onChange={(e)=>setAgentPrompt(e.target.value)} placeholder="Descreva a ação que deseja executar..." className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-[#0052FF]"/><button disabled={busy||!agentPrompt.trim()} className="inline-flex items-center gap-2 rounded-lg bg-[#0052FF] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{busy?<LoaderCircle size={16} className="animate-spin"/>:<ArrowRight size={16}/>}Enviar</button></form><div className="mt-3 flex flex-wrap gap-2">{suggestions.map((text)=><button key={text} onClick={()=>setAgentPrompt(text)} className="rounded-full border border-slate-200 px-3 py-1.5 text-[11px] text-slate-600 hover:border-blue-300 hover:text-[#0052FF]">{text}</button>)}</div>
+            {lastAction ? <div className="mt-5 border-t border-slate-100 pt-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Última ação da sessão</h3><div className="flex gap-2"><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-600">{lastAction.modelUsed}</span><span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-semibold text-blue-700">{lastAction.toolName}</span></div></div><p className="text-sm font-medium">{lastAction.actionExecuted}</p><div className="mt-3 grid grid-cols-2 gap-3"><MiniMetric label="Impacto estimado" value={money(lastAction.financialImpactBrl)}/><MiniMetric label="Horas liberadas" value={`${lastAction.hoursSaved.toLocaleString("pt-BR")}h`}/></div>{lastAction.requiresHumanApproval&&<div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3"><p className="flex gap-2 text-xs font-semibold text-amber-900"><AlertTriangle size={15}/>{lastAction.approvalReason||"Ação requer validação humana."}</p>{lastAction.status==="Pendente"&&<div className="mt-3 flex gap-2"><button onClick={()=>updateAuditStatus(lastAction.id,"Aprovada")} className="rounded-md bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white">Aprovar Execução</button><button onClick={()=>updateAuditStatus(lastAction.id,"Rejeitada")} className="rounded-md border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-900">Rejeitar</button></div>}<p className="mt-2 text-[10px] text-amber-800">Aprovação registrada apenas nesta sessão; a API não executa ação externa.</p></div>}<p className="mt-3 text-xs leading-relaxed text-slate-600">{lastAction.justification}</p>{lastAction.customerMessageDraft&&<div className="mt-3 rounded-lg bg-slate-50 p-3"><div className="mb-1 flex items-center justify-between"><span className="text-[10px] font-bold uppercase text-slate-500">Rascunho ao cliente</span><button onClick={()=>{void navigator.clipboard.writeText(lastAction.customerMessageDraft);setToast("Mensagem copiada.");}} className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#0052FF]"><Clipboard size={12}/>Copiar Mensagem</button></div><p className="text-xs text-slate-700">{lastAction.customerMessageDraft}</p></div>}</div> : <div className="mt-5 rounded-lg border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">As ações realizadas aparecerão aqui para revisão.</div>}
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold">Trilha de auditoria da sessão</h2><p className="text-xs text-slate-500">Ações, aprovações e impacto registrados neste navegador</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold">{audit.length}</span></div>{audit.length?<div className="max-h-[420px] space-y-2 overflow-y-auto">{audit.map((item)=><div key={item.id} className="rounded-lg border border-slate-100 p-3"><div className="flex items-start justify-between gap-2"><div><p className="text-xs font-semibold">{item.actionExecuted}</p><p className="mt-1 text-[10px] text-slate-400">{item.timestamp} • {item.toolName}</p></div><span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${item.status==="Aprovada"?"bg-emerald-50 text-emerald-700":item.status==="Pendente"?"bg-amber-50 text-amber-800":"bg-rose-50 text-rose-700"}`}>{item.status}</span></div><div className="mt-2 flex justify-between text-[11px]"><span className="text-slate-500">{item.modelUsed}</span><strong className="text-emerald-700">{money(item.financialImpactBrl)} protegidos</strong></div></div>)}</div>:<div className="rounded-lg border border-dashed border-slate-200 py-14 text-center"><Clock3 className="mx-auto mb-2 text-slate-300"/><p className="text-sm text-slate-400">Nenhuma ação nesta sessão.</p></div>}</div>
+        </section>
+      </>}
+      <footer className="flex flex-col gap-1 border-t border-slate-200 py-4 text-[11px] text-slate-400 sm:flex-row sm:justify-between"><span>GoGroup • Torre de Controle AI-First • Dados calculados pelo motor determinístico</span><span>Decisões de alçada requerem aprovação operacional.</span></footer>
+    </div>
+    {uploadOpen&&<div role="dialog" aria-modal="true" aria-labelledby="upload-title" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="mb-5 flex items-start justify-between"><div><span className="inline-flex rounded-lg bg-blue-50 p-2 text-[#0052FF]"><FileUp/></span><h2 id="upload-title" className="mt-3 text-xl font-bold">Carregar lote CSV</h2><p className="mt-1 text-sm text-slate-500">Os arquivos são processados no navegador e enviados à API apenas para cálculo em memória.</p></div><button aria-label="Fechar" onClick={()=>setUploadOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X size={18}/></button></div><label className="flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed border-slate-300 px-5 py-9 text-center hover:border-[#0052FF]"><Upload className="mb-3 text-[#0052FF]"/><span className="text-sm font-semibold">Selecione os três arquivos CSV</span><span className="mt-1 text-xs text-slate-500">pedidos_excecao.csv, clientes.csv e transportadoras.csv</span><input type="file" accept=".csv,text/csv" multiple onChange={(e)=>void loadCsv(e.target.files)} className="sr-only"/></label>{busy&&<p className="mt-4 flex items-center gap-2 text-sm text-[#0052FF]"><LoaderCircle className="animate-spin" size={16}/>Processando lote na sessão...</p>}<div className="mt-4 flex items-start gap-2 rounded-lg bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-900"><ShieldCheck size={16} className="shrink-0"/>IDs de pedido e cliente são anonimizados antes do envio. Nenhum arquivo é salvo em disco.</div></div></div>}
+    {selected&&<div className="fixed inset-0 z-40 flex justify-end bg-slate-950/30" onClick={()=>setSelected(null)}><aside onClick={(e)=>e.stopPropagation()} className="h-full w-full max-w-md overflow-y-auto bg-white p-6 shadow-2xl"><div className="flex items-start justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-[#0052FF]">Dossiê do pedido</p><h2 className="mt-1 text-xl font-bold">{selected.order_id}</h2></div><button onClick={()=>setSelected(null)} aria-label="Fechar dossiê" className="rounded-lg p-2 hover:bg-slate-100"><X size={18}/></button></div><div className="mt-5 space-y-3">{[["Marca",selected.marca ?? "—"],["SKU",selected.sku ?? "—"],["Produto",selected.descricao_produto ?? "—"],["Exceção",friendly[selected.tipo_excecao] ?? selected.tipo_excecao],["Valor",money(selected.valor)],["EV_Risco",money(selected.evRisco)],["Atraso útil",`${selected.dias_atraso_uteis} dias úteis`],["Promessa recalculada",selected.data_prometida_real],["Governança",selected.requerAlcadaHumana ? "Alçada humana obrigatória" : "Autônomo"]].map(([label,value])=><div key={label} className="flex justify-between gap-4 border-b border-slate-100 py-2 text-sm"><span className="text-slate-500">{label}</span><strong className="text-right">{value}</strong></div>)}</div><p className="mt-5 rounded-lg bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">O agente prepara a decisão com base nos valores calculados pelo motor. Aprovações exibidas na tela são controles da sessão.</p></aside></div>}
+    {toast&&<div role="status" className="fixed bottom-5 right-5 z-[60] flex max-w-sm items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm text-white shadow-xl"><Check size={16} className="shrink-0 text-emerald-400"/>{toast}<button onClick={()=>setToast("")} aria-label="Fechar aviso" className="ml-2 text-slate-400"><X size={15}/></button></div>}
+  </main>;
+}
+
+function change(current: number, previous: number) { return `${current >= previous ? "+" : ""}${(((current - previous) / Math.max(1, previous)) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`; }
+function Kpi({ icon, color, title, value, detail, foot }: { icon: React.ReactNode; color: "blue"|"violet"|"amber"; title: string; value: string; detail: string; foot: string }) {
+  const colors = { blue: "bg-blue-50 text-blue-700", violet: "bg-violet-50 text-violet-700", amber: "bg-amber-50 text-amber-700" };
+  return <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</span><span className={`rounded-lg p-2 ${colors[color]}`}>{icon}</span></div><strong className="block truncate text-2xl font-bold tracking-tight">{value}</strong><p className="mt-1 text-sm font-medium text-slate-700">{detail}</p><p className="mt-2 text-[11px] leading-relaxed text-slate-400">{foot}</p></div>;
+}
+function MiniMetric({ label, value }: { label: string; value: string }) { return <div className="rounded-lg bg-slate-50 p-3"><p className="text-[10px] uppercase text-slate-500">{label}</p><p className="mt-1 font-bold text-slate-900">{value}</p></div>; }
+function OrderRow({ row, position, onResolve, busy, state }: { row: Enriched; position: number; onResolve: () => void; busy: boolean; state?: string }) {
+  const checkoutDiff = row.data_prometida ? Math.round((new Date(`${row.data_prometida}T12:00:00Z`).getTime() - new Date(`${row.data_prometida_real}T12:00:00Z`).getTime()) / 86400000) : null;
+  return <tr className="hover:bg-slate-50/80"><td className="px-3 py-3"><span className="mr-2 text-slate-400">{position}</span><strong className="font-mono text-slate-800">{row.order_id}</strong>{row.isVip&&<span className="ml-1.5 rounded bg-violet-100 px-1.5 py-0.5 text-[9px] font-bold text-violet-800">VIP</span>}</td><td className="max-w-[200px] px-3 py-3"><span className="block font-semibold">{row.marca ?? "—"}</span><span className="block truncate text-slate-500">{row.sku ?? "—"} • {row.descricao_produto ?? "Produto"}</span></td><td className="px-3 py-3"><span className="block font-medium">{friendly[row.tipo_excecao] ?? row.tipo_excecao}</span><span className="text-slate-500">{row.status ?? "—"}</span></td><td className="px-3 py-3"><span title={`Promessa de checkout: ${row.data_prometida ?? "não informada"} • promessa real: ${row.data_prometida_real}${checkoutDiff===null?"":` • diferença: ${checkoutDiff} dias corridos`}`} className="cursor-help font-semibold">{row.dias_atraso_uteis} d.u.</span><span className="ml-1 text-slate-400">ⓘ</span></td><td className="px-3 py-3 text-right font-medium">{money(row.valor)}</td><td className="px-3 py-3 text-right font-bold text-[#0052FF]">{money(row.evRisco)}</td><td className="px-3 py-3">{row.requerAlcadaHumana?<span className="whitespace-nowrap rounded-full bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800">Alçada Humana</span>:<span className="whitespace-nowrap rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-800">Autônomo</span>}</td><td className="px-3 py-3">{state==="Pendente"?<button onClick={onResolve} className="whitespace-nowrap rounded-md bg-amber-100 px-2.5 py-1.5 font-semibold text-amber-900">Aguardando Aprovação</button>:state==="Aprovada"?<span className="whitespace-nowrap text-emerald-700">Resolvido pelo Agente</span>:<button disabled={busy} onClick={onResolve} className="whitespace-nowrap rounded-md border border-blue-200 px-2.5 py-1.5 font-semibold text-[#0052FF] hover:bg-blue-50 disabled:opacity-50">Resolver com Agente</button>}</td></tr>;
+}
