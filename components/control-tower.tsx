@@ -13,11 +13,12 @@ import { Auditoria } from './Auditoria';
 import type { ActionHistory, AuditRecord, Dashboard, EnrichedOrder } from './control-types';
 
 const statuses = { em_analise: 1, aberta: 2, aguardando_transportadora: 3, aguardando_cliente: 4 };
-type AgentResponse = { action?: ActionHistory | null; error?: string; modelUsed?: string };
+type AgentStep = { round: number; papel: string; pensamentoResumido: string; tool: string; argumentos: Record<string, unknown>; resultado: unknown };
+type AgentResponse = { actions?: ActionHistory[]; audit?: AuditRecord[]; error?: string; modelUsed?: string; text?: string; steps?: AgentStep[] };
 
 export function ControlTower() {
   const [data,setData]=useState<Dashboard|null>(null),[actions,setActions]=useState<ActionHistory[]>([]),[audit,setAudit]=useState<AuditRecord[]>([]),[storeKind,setStoreKind]=useState('memory');
-  const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[toast,setToast]=useState(''),[capacity,setCapacity]=useState<number>(BUSINESS.dailyCapacity),[abandonment,setAbandonment]=useState(BUSINESS.paymentAbandonmentProbability*100),[rupture,setRupture]=useState(BUSINESS.stockoutRiskFloor*100);
+  const [loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[toast,setToast]=useState(''),[agentSteps,setAgentSteps]=useState<AgentStep[]>([]),[agentText,setAgentText]=useState(''),[capacity,setCapacity]=useState<number>(BUSINESS.dailyCapacity),[abandonment,setAbandonment]=useState(BUSINESS.paymentAbandonmentProbability*100),[rupture,setRupture]=useState(BUSINESS.stockoutRiskFloor*100);
   const [source,setSource]=useState<'snapshot'|'csv'>('snapshot'),[uploadOpen,setUploadOpen]=useState(false),[methodologyOpen,setMethodologyOpen]=useState(false),[selected,setSelected]=useState<EnrichedOrder|null>(null);
 
   const loadActions=useCallback(async()=>{
@@ -44,8 +45,9 @@ export function ControlTower() {
       const response=await fetch('/api/agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,toolName,args})});
       const payload=await response.json() as AgentResponse;
       if(!response.ok)throw new Error(payload.error??'O agente não conseguiu preparar a ação.');
-      if(!payload.action){setToast(payload.error??'Nenhuma ação foi criada.');return;}
-      setToast(payload.action.status==='aguardando_aprovacao'?'Ação aguardando aprovação humana.':payload.action.status==='executada'?'Ação registrada; efeito externo simulado.':'Ação gravada no store.');
+      setAgentSteps(payload.steps??[]);setAgentText(payload.text??'');
+      if(payload.actions){setActions(payload.actions);if(payload.audit)setAudit(payload.audit);}
+      setToast(payload.text??'Trilha do agente atualizada.');
       await load();
     }catch(error){setToast(error instanceof Error?error.message:'Falha ao acionar o agente.');}
     finally{setBusy(false);}
@@ -62,9 +64,9 @@ export function ControlTower() {
     finally{setBusy(false);}
   };
   const recalculate=()=>void load({capacidade:capacity,probAbandono:abandonment/100,tetoRuptura:rupture/100});
-  const handleRow=(order:EnrichedOrder)=>void sendAction(`Preparar ação para o pedido ${order.order_id}.`, 'resolver_pedido_individual', {orderId:order.order_id,acaoRecomendada:order.zeroTouchAction??'avaliar e preparar resolução'});
-  const handleCause=(id:string,title:string)=>void sendAction(`Preparar plano sistêmico para ${title}.`,'aplicar_acao_sistemica',{anomaliaId:id});
-  const handleZero=()=>void sendAction('Preparar o lote Zero-Touch elegível.','executar_lote_zero_touch',{categoria:'todos'});
+  const handleRow=(order:EnrichedOrder)=>void sendAction(`Investigue e recomende o próximo passo para o pedido ${order.order_id}.`);
+  const handleCause=(id:string,title:string)=>void sendAction(`Investigue a causa-raiz ${title} (id ${id}) e recomende o próximo passo.`);
+  const handleZero=()=>void sendAction('Monte o plano de hoje.');
 
   const loadCsv=async(files:FileList|null)=>{
     if(!files||files.length<3){setToast('Selecione os três arquivos CSV.');return;}
@@ -95,7 +97,7 @@ export function ControlTower() {
   return <main className="min-h-screen bg-slate-50 text-slate-900"><div className="mx-auto max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8">
     <header className="mb-6 flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between"><div className="flex items-start gap-4"><div className="rounded-xl bg-[#0052FF] p-3 text-white"><Activity size={24}/></div><div><p className="text-xs font-bold uppercase tracking-[.18em] text-[#0052FF]">GoGroup • Operações</p><h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">Torre de Controle AI-First</h1><p className="mt-1 text-sm text-slate-500">Gocase &amp; GoBeauté <span className="mx-1 text-slate-300">•</span> Referência 30/09/2026</p></div></div><div className="flex flex-wrap gap-2"><span className="rounded-full bg-slate-100 px-3 py-2 text-xs font-semibold">Fonte: {source==='snapshot'?'dataset do servidor':'CSV da sessão'}</span><button onClick={()=>setMethodologyOpen(true)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold hover:bg-slate-50">Metodologia</button><button onClick={()=>setUploadOpen(true)} className="inline-flex items-center gap-2 rounded-lg bg-[#0052FF] px-3 py-2 text-xs font-semibold text-white"><Upload size={15}/>Carregar CSV</button></div></header>
     <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="mb-4 flex items-center justify-between"><div><h2 className="font-semibold">Premissas &amp; simulador</h2><p className="text-xs text-slate-500">Recalcule a fila sem alterar os dados persistidos.</p></div><span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">Padrões definidos pelo motor</span></div><div className="grid gap-4 md:grid-cols-4 md:items-end"><NumberInput label="Capacidade diária" value={capacity} min={1} onChange={setCapacity}/><NumberInput label="Abandono de pagamento (%)" value={abandonment} min={0} max={100} onChange={setAbandonment}/><NumberInput label="Piso de ruptura (%)" value={rupture} min={0} max={100} onChange={setRupture}/><button disabled={loading||busy} onClick={recalculate} className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">Recalcular cenário</button></div></section>
-    {loading&&!data?<div className="flex min-h-72 items-center justify-center text-slate-500">Carregando operação…</div>:data&&<><KPIs data={data} busy={busy} onZeroTouch={handleZero} actionCount={actions.length}/><Fila data={data} actions={actions} busy={busy} onAction={handleRow} onSelect={setSelected}/><CausasRaiz data={data} busy={busy} onAction={handleCause}/><AgentePainel actions={actions} busy={busy} onSend={message=>void sendAction(message)} onDecision={(id,decision)=>void decideAction(id,decision)} storeKind={storeKind}/><Auditoria actions={actions} audit={audit} orderStates={data.orderStates} onDecision={(id,decision)=>void decideAction(id,decision)}/></>}
+    {loading&&!data?<div className="flex min-h-72 items-center justify-center text-slate-500">Carregando operação…</div>:data&&<><KPIs data={data} busy={busy} onZeroTouch={handleZero} actionCount={actions.length}/><Fila data={data} actions={actions} busy={busy} onAction={handleRow} onSelect={setSelected}/><CausasRaiz data={data} busy={busy} onAction={handleCause}/><AgentePainel actions={actions} busy={busy} onSend={message=>void sendAction(message)} onDecision={(id,decision)=>void decideAction(id,decision)} storeKind={storeKind} steps={agentSteps} summary={agentText}/><Auditoria actions={actions} audit={audit} orderStates={data.orderStates} onDecision={(id,decision)=>void decideAction(id,decision)}/></>}
     <footer className="flex flex-col gap-1 border-t border-slate-200 py-4 text-[11px] text-slate-400 sm:flex-row sm:justify-between"><span>GoGroup • Torre de Controle AI-First • Valores do motor determinístico</span><span>Estados da fila e auditoria são carregados do store.</span></footer>
   </div>
   {uploadOpen&&<div role="dialog" aria-modal="true" aria-labelledby="upload-title" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"><div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"><div className="mb-5 flex items-start justify-between"><div><span className="inline-flex rounded-lg bg-blue-50 p-2 text-[#0052FF]"><FileUp/></span><h2 id="upload-title" className="mt-3 text-xl font-bold">Carregar lote CSV</h2><p className="mt-1 text-sm text-slate-500">Os arquivos são calculados em memória e não são salvos em disco.</p></div><button aria-label="Fechar carregamento CSV" onClick={()=>setUploadOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X size={18}/></button></div><label className="flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed border-slate-300 px-5 py-9 text-center hover:border-[#0052FF]"><Upload className="mb-3 text-[#0052FF]"/><span className="text-sm font-semibold">Selecione três arquivos CSV</span><span className="mt-1 text-xs text-slate-500">pedidos_excecao.csv, clientes.csv, transportadoras.csv</span><input type="file" accept=".csv,text/csv" multiple onChange={event=>void loadCsv(event.target.files)} className="sr-only"/></label>{busy&&<p className="mt-4 text-sm text-[#0052FF]">Processando lote…</p>}<p className="mt-4 flex items-start gap-2 rounded-lg bg-emerald-50 p-3 text-xs text-emerald-900"><ShieldCheck size={16} className="shrink-0"/>IDs são anonimizados antes do envio à API.</p></div></div>}

@@ -1,40 +1,58 @@
 import Groq from 'groq-sdk';
 import { NextResponse } from 'next/server';
-import { dashboard, executeDeterministic, loadDataset } from '@/lib/tools';
+import { dashboard, loadDataset } from '@/lib/tools';
 import { checkAgentRateLimit } from '@/lib/ratelimit';
 import { BUSINESS } from '@/lib/params';
+import { runAgentLoop } from '@/lib/agent/loop';
+import { deterministicFallback } from '@/lib/agent/fallback';
+import { runAgentTool } from '@/lib/agent/tools';
+import { recordGuardrailOccurrence } from '@/lib/agent/guardrails';
+import { getActionStore } from '@/lib/store';
+import type { Action } from '@/lib/actions';
 
-const tools = [
-  { type: 'function', function: { name: 'executar_lote_zero_touch', description: 'Prepara um lote Zero-Touch elegível para revisão/envio.', parameters: { type: 'object', properties: { categoria: { type: 'string', enum: ['atraso_entregue','pagamento_pendente','endereco_divergente','todos'] } }, required: ['categoria'] } } },
-  { type: 'function', function: { name: 'resolver_pedido_individual', description: 'Prepara encaminhamento individual respeitando alçadas.', parameters: { type: 'object', properties: { orderId: { type: 'string' }, acaoRecomendada: { type: 'string' }, tipo: { type: 'string', enum: ['reenvio','reembolso'] } }, required: ['orderId','acaoRecomendada'] } } },
-  { type: 'function', function: { name: 'aplicar_acao_sistemica', description: 'Prepara ação para causa-raiz operacional, sujeita a validação humana.', parameters: { type: 'object', properties: { anomaliaId: { type: 'string' } }, required: ['anomaliaId'] } } },
-  { type: 'function', function: { name: 'simular_premissas_e_capacidade', description: 'Simula capacidade e premissas operacionais determinísticas.', parameters: { type: 'object', properties: { capacidadeDiaria: { type: 'number' }, probAbandonoPagamento: { type: 'number' }, tetoRuptura: { type: 'number' } } } } },
-] as const;
+async function persistTrace(result: Awaited<ReturnType<typeof deterministicFallback>>, store: ReturnType<typeof getActionStore>) {
+  const actionIds = new Set<string>();
+  const scan = (value: unknown) => {
+    if (!value || typeof value !== 'object') return;
+    if ('id' in value && 'status' in value && 'efeito' in value) actionIds.add(String((value as Action).id));
+    if (Array.isArray(value)) value.forEach(scan); else Object.values(value).forEach(scan);
+  };
+  result.steps.forEach(step => scan(step.resultado));
+  const actions = await store.listActions();
+  for (const action of actions) if (actionIds.has(action.id)) await store.saveAction({ ...action, trilhaAgente: result.steps });
+  return { ...result, actions: await store.listActions(), audit: await store.listAudit(), store: store.kind };
+}
 
 export async function POST(request: Request) {
   const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
   const ip = forwarded || request.headers.get('x-real-ip') || 'unknown';
   const limit = checkAgentRateLimit(ip);
   if (!limit.allowed) return NextResponse.json({ error: 'Limite de uso atingido. Tente novamente após 10 minutos.' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfterSeconds) } });
-  let body: { message?: string; prompt?: string; toolName?: string; args?: Record<string, unknown> };
+  let body: { message?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: 'JSON inválido.' }, { status: 400 }); }
-  const message = body.message ?? body.prompt ?? 'Priorize casos elegíveis para automação.';
-  if (typeof message !== 'string') return NextResponse.json({ error: 'A mensagem deve ser um texto.' }, { status: 400 });
-  if (message.length > BUSINESS.agentMessageMaxLength) return NextResponse.json({ error: `A mensagem pode ter no máximo ${BUSINESS.agentMessageMaxLength} caracteres.` }, { status: 413 });
-  const dataset = loadDataset(), context = await dashboard(dataset);
-  if (body.toolName) return NextResponse.json(await executeDeterministic(body.toolName, body.args ?? {}, dataset));
-  const fallback = async (name = 'executar_lote_zero_touch', args: Record<string, unknown> = { categoria: 'todos' }) => NextResponse.json(await executeDeterministic(name, args, dataset));
-  if (!process.env.GROQ_API_KEY) return fallback();
+  if (typeof body.message !== 'string' || !body.message.trim()) return NextResponse.json({ error: 'Informe uma mensagem de texto.' }, { status: 400 });
+  if (body.message.length > BUSINESS.agentMessageMaxLength) return NextResponse.json({ error: `A mensagem pode ter no máximo ${BUSINESS.agentMessageMaxLength} caracteres.` }, { status: 413 });
+
+  const message = body.message.trim(), dataset = loadDataset(), store = getActionStore();
+  const data = await dashboard(dataset, {}, store);
+  const fallback = () => deterministicFallback(message, dataset, store);
+  if (!process.env.GROQ_API_KEY) return NextResponse.json(await persistTrace(await fallback(), store));
   try {
     const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
-    let model = 'llama-3.3-70b-versatile';
-    let response;
-    const messages = [{ role: 'system' as const, content: `Você é agente operacional. Escolha ferramentas apropriadas. Não invente valores financeiros ou prazos; use somente resultados do motor determinístico. Tools gravam ações e podem atualizar estados de pedidos no store. Efeitos externos continuam simulados. Contexto: ${JSON.stringify({ totals: context.totals, systemic: context.systemic.map(({ id, title, count, gmvExposto, economiaEstimada }) => ({ id, title, count, gmvExposto, economiaEstimada })) })}` }, { role: 'user' as const, content: message }];
-    try { response = await client.chat.completions.create({ model, messages, tools: [...tools], tool_choice: 'auto' }); }
-    catch { model = 'llama-3.1-8b-instant'; response = await client.chat.completions.create({ model, messages, tools: [...tools], tool_choice: 'auto' }); }
-    const call = response.choices[0]?.message.tool_calls?.[0];
-    if (!call) return NextResponse.json({ ...await executeDeterministic('executar_lote_zero_touch', { categoria: 'todos' }, dataset), modelUsed: model });
-    const args = JSON.parse(call.function.arguments) as Record<string, unknown>;
-    return NextResponse.json({ ...await executeDeterministic(call.function.name, args, dataset), modelUsed: model });
-  } catch { return fallback(); }
+    const result = await runAgentLoop({
+      message,
+      context: { activeOrders: data.totals.pedidos, pendingActions: (await store.listActions()).filter(action => action.status === 'aguardando_aprovacao').length, causes: data.systemic.map(({ id, title, count }) => ({ id, title, count })) },
+      callModel: async (model, messages, tools) => {
+        const response = await client.chat.completions.create({ model, messages: messages as never[], tools: tools as never[], tool_choice: 'auto' });
+        const choice = response.choices[0]?.message;
+        return { content: choice?.content ?? null, toolCalls: choice?.tool_calls?.map(call => ({ id: call.id, function: call.function })) };
+      },
+      runTool: (name, args) => runAgentTool(name, args, dataset, store),
+      deterministicFallback: fallback,
+      onGuardrail: description => recordGuardrailOccurrence(store, `agent:${Date.now()}`, description),
+    });
+    return NextResponse.json(await persistTrace(result, store));
+  } catch {
+    return NextResponse.json(await persistTrace(await fallback(), store));
+  }
 }

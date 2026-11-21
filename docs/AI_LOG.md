@@ -13,3 +13,10 @@
 - **Correção durante a tarefa:** um teste inicial esperava a promessa para terça-feira, mas o próprio SLA acrescenta um dia útil de preparação além do transporte; corrigi a expectativa para quarta-feira. O build também revelou um tipo de aprovação desatualizado após tornar explícito que a aprovação só existe na sessão; atualizei o tipo e validei novamente.
 - **Decisão:** valores sem origem financeira demonstrável foram removidos ou derivados dos dados. O prazo usa um dia útil de preparação como premissa editável. Aprovações e lotes são apresentados como preparados/registrados na sessão, pois nenhuma ação é persistida em sistema externo.
 - **Validação:** `npm test`, `npm run lint` e `npm run build` passaram; o teste automatizado de mojibake passou. A demo e fixture são sintéticas. O snapshot privado local permaneceu ignorado pelo Git.
+
+## 2026-11-21 — Laço de trabalho e especialistas do agente
+
+- **Pedido:** substituir a chamada de ferramenta única por orquestração limitada, papéis especialistas, ferramentas persistidas, escalada humana, validação numérica, fallback determinístico, trilha visível e testes com LLM mockado.
+- **Correção durante a tarefa:** o primeiro build apontou um campo `objective` fora do schema `objetivo`; corrigi o mapeamento. A revisão também mostrou que o Zero-Touch poderia incluir pedidos com alçada e que o fallback não anexava a trilha às ações: filtrei a alçada antes da execução e persisti a trilha em cada ação gerada.
+- **Decisão:** cada pedido de plano usa seis rodadas no máximo; a demonstração sem chave roda a sequência determinística com as mesmas tools. A recomendação de resolução compara reenvio (CMV + frete + contato + LTV), reembolso (valor pago + contato + LTV) e aguardar (EV_Risco), usando somente valores do motor. Casos com alçada ficam pendentes para o papel humano responsável.
+- **Validação:** testes mockados cobrem limite do loop, escalada sem efeito de estado, remoção de números não verificados e plano determinístico com Zero-Touch, duas escaladas, dossiê e chamado pendente.

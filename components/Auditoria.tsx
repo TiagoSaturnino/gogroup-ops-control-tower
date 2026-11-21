@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import type { ActionHistory, AuditRecord } from './control-types';
 const money=(value:number)=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(value||0);
 export function Auditoria({actions,audit,orderStates,onDecision}:{actions:ActionHistory[];audit:AuditRecord[];orderStates:Record<string,string>;onDecision:(id:string,decision:'aprovar'|'rejeitar')=>void}) {

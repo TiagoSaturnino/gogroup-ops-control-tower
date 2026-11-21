@@ -1,4 +1,4 @@
-﻿import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { dashboard } from '@/lib/tools';
 import type { Order } from '@/lib/engine';
 import { BUSINESS } from '@/lib/params';

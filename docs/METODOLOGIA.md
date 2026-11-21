@@ -19,6 +19,9 @@
 - Data de referência do motor: 30/09/2026, informada pela base do desafio.
 - Burn-down: pedidos ordenados por FIFO (data de abertura, depois data do pedido) ou EV decrescente; processamento diário em lotes da capacidade parametrizada. EV acumulado é a soma dos EV dos pedidos processados até aquele dia.
 - Zero-Touch: 12 minutos humanos poupados por caso; capacidade de 150/dia e 12 minutos/caso: dados oficiais do enunciado.
+- Comparação de resolução: reenvio = custo CMV + frete + contato + perda esperada de LTV; reembolso = valor pago + contato + perda esperada de LTV; aguardar = EV_Risco do motor. O motor escolhe o menor custo calculado; LTV e custos diretos vêm exclusivamente dos dados e fórmulas acima.
+- Orquestração: o Groq escolhe tools e redige texto; Triagem, Investigador e Comunicação têm permissões e alçadas delimitadas. Até seis rodadas de modelo; no erro ou indisponibilidade, o plano equivalente usa as mesmas tools determinísticas. A saída textual monetária ou temporal é validada contra os resultados de tools da execução.
+- Chamado para transportadora e escalada: são Actions persistidas aguardando aprovação humana; não são chamadas externas executadas. O Zero-Touch só inclui pedidos sem alçada e persiste `em_tratativa`.
 
 ## Constantes e origens
 

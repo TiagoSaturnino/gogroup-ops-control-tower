@@ -19,6 +19,7 @@ export const BUSINESS = {
   paymentAbandonmentProbability: 0.30, // PREMISSA NOSSA: abandono de pagamento de 30%.
   stockoutRiskFloor: 0.40, // PREMISSA NOSSA: piso de risco para ruptura de 40%.
   approvalValueThreshold: 250, // PREMISSA NOSSA: alçada humana acima de R$ 250.
+  approvalOwners: { vip: 'Líder de Operações', highValue: 'Gestor Financeiro', stockout: 'Responsável de Supply', systemic: 'Líder de Logística', distributionCenter: 'Gestor do CD2', technical: 'Responsável Técnica' }, // PREMISSA NOSSA: papéis responsáveis por revisar cada tipo de alçada.
   itemMissingReshipShare: 0.40, // PREMISSA NOSSA: fração do custo de reenvio em item faltante.
   trackingRiskFloor: 0.22, // PREMISSA NOSSA: piso de risco de rastreio/devolução de 22%.
   agentRequestsPerWindow: 20, // Limite definido nesta tarefa: 20 chamadas por janela.

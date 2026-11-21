@@ -36,13 +36,13 @@ export async function executeDeterministic(toolName: string, args: Record<string
   if (toolName === 'executar_lote_zero_touch') {
     const category = String(args.categoria ?? 'todos');
     const accepted = category === 'todos' ? ['atraso_entrega','pagamento_pendente','endereco_divergente'] : [category === 'atraso_entregue' ? 'atraso_entrega' : category];
-    rows = result.orders.filter(order => order.isZeroTouch && accepted.includes(order.tipo_excecao));
+    rows = result.orders.filter(order => order.isZeroTouch && !order.requerAlcadaHumana && accepted.includes(order.tipo_excecao));
     if (!rows.length) return { actionExecuted: 'Nenhum pedido elegível novo para Zero-Touch.', affectedOrderIds: [], action: null, requiresHumanApproval: false };
     impact = rows.reduce((total, order) => total + order.evRisco, 0);
     hours = rows.length * BUSINESS.minutesPerCase / 60;
     type = 'zero_touch_aviso';
     system = 'WhatsApp Business API';
-    requiresHumanApproval = rows.some(order => order.requerAlcadaHumana);
+    requiresHumanApproval = false;
     justification = `Lote calculado pelo motor sobre ${rows.length} pedidos elegíveis; EV agregado de R$ ${impact.toFixed(2)}.`;
     customerMessageDraft = 'Olá! Estamos acompanhando sua solicitação. Esta mensagem é uma simulação e não foi enviada.';
     actionExecuted = `Aviso de acompanhamento preparado para ${rows.length} pedidos.`;

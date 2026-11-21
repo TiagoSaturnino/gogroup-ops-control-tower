@@ -1,5 +1,5 @@
 export type ActionStatus = 'proposta' | 'aguardando_aprovacao' | 'aprovada' | 'rejeitada' | 'executada';
-export type ActionType = 'zero_touch_aviso' | 'reenvio' | 'reembolso' | 'chamado_transportadora' | 'bloqueio_lote' | 'resolver_pedido' | 'simulacao';
+export type ActionType = 'zero_touch_aviso' | 'reenvio' | 'reembolso' | 'chamado_transportadora' | 'bloqueio_lote' | 'resolver_pedido' | 'simulacao' | 'consulta_fila' | 'comparacao' | 'investigacao' | 'comunicacao_cliente' | 'escalonamento';
 export type Action = {
   id: string;
   orderIds: string[];
@@ -14,6 +14,7 @@ export type Action = {
   criadaEm: string;
   atualizadaEm: string;
   efeito: { tipo: 'real' | 'simulado'; descricao: string; sistema: string };
+  trilhaAgente?: Array<{ round: number; papel: string; pensamentoResumido: string; tool: string; argumentos: Record<string, unknown>; resultado: unknown }>;
 };
 
 export type OrderState = 'aberto' | 'em_tratativa' | 'resolvido' | 'cancelado';
@@ -21,7 +22,7 @@ export type OrderState = 'aberto' | 'em_tratativa' | 'resolvido' | 'cancelado';
 export type AuditRecord = {
   id: string;
   actionId: string;
-  evento: 'criada' | 'aprovada' | 'rejeitada' | 'executada';
+  evento: 'criada' | 'aprovada' | 'rejeitada' | 'executada' | 'texto_corrigido';
   responsavel: 'agente' | 'humano';
   ocorridaEm: string;
   descricao: string;

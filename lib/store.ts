@@ -11,7 +11,7 @@ export interface ActionStore {
   getAction(id: string): Promise<Action | undefined>;
   createAction(action: Action): Promise<{ action: Action; created: boolean }>;
   saveAction(action: Action): Promise<void>;
-  completeAction(action: Action, state: OrderState): Promise<void>;
+  completeAction(action: Action, state: OrderState | null): Promise<void>;
   getOrderStates(): Promise<Record<string, OrderState>>;
   setOrderState(orderId: string, state: OrderState): Promise<void>;
   listAudit(): Promise<AuditRecord[]>;
@@ -36,11 +36,11 @@ abstract class DataStore implements ActionStore {
     return result;
   }
   async saveAction(action: Action) { await this.mutate(data => { const index = data.actions.findIndex(item => item.id === action.id); if (index < 0) data.actions.push(action); else data.actions[index] = action; }); }
-  async completeAction(action: Action, state: OrderState) {
+  async completeAction(action: Action, state: OrderState | null) {
     await this.mutate(data => {
       const index = data.actions.findIndex(item => item.id === action.id);
       if (index < 0) data.actions.push(action); else data.actions[index] = action;
-      for (const orderId of action.orderIds) data.orderStates[orderId] = state;
+      if (state) for (const orderId of action.orderIds) data.orderStates[orderId] = state;
       const auditId = `${action.id}:executada`;
       if (!data.audit.some(record => record.id === auditId)) data.audit.push({ id: auditId, actionId: action.id, evento: 'executada', responsavel: action.responsavel, ocorridaEm: action.atualizadaEm, descricao: action.efeito.descricao });
     });
@@ -101,7 +101,7 @@ export function getActionStore() {
 export async function executeActionEffect(action: Action, store = getActionStore()) {
   if (action.status !== 'aprovada') throw new Error('Somente ações aprovadas podem ser executadas.');
   const updated = transitionAction(action, 'executada', action.responsavel);
-  const state = action.tipo === 'reembolso' ? 'cancelado' : 'em_tratativa';
+  const state = action.tipo === 'reembolso' ? 'cancelado' : ['consulta_fila','comparacao','investigacao','comunicacao_cliente','simulacao'].includes(action.tipo) ? null : 'em_tratativa';
   await store.completeAction(updated, state);
   return updated;
 }
