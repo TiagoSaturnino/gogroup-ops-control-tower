@@ -32,6 +32,8 @@ Os custos de frete de benchmark vêm das rotas recebidas com o dataset; se não 
 ## Ações e persistência
 
 - Uma ação percorre `proposta → aguardando_aprovacao → aprovada → executada`, ou termina em `rejeitada`. Decisões de alçada humana são registradas no store e na trilha de auditoria.
-- O Zero-Touch coloca pedidos em `em_tratativa`. Esse é um efeito persistido no GoGroup Ops; a notificação ao cliente continua simulada. Os pedidos saem da fila ativa, dos totais ativos e do burn-down. Não são rotulados como resolvidos.
+- O Zero-Touch coloca pedidos em `em_tratativa`. Esse é um efeito persistido no GoGroup Ops; sem Telegram configurado, a notificação ao cliente é simulada. Com Telegram configurado, o envio confirmado ao chat de demonstração é real nesse canal, mas não é mensagem a cliente real nem comprova resolução. Os pedidos saem da fila ativa, dos totais ativos e do burn-down.
 - Os estados `aberto`, `em_tratativa`, `resolvido` e `cancelado` são mantidos no store. Integração externa com WhatsApp Business API, ERP e painel da transportadora não está habilitada; o sistema informa qual integração seria chamada em produção.
 - O store usa memória do processo sem credenciais. Com `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN`, usa Upstash Redis REST. O estado da demo expira após sete dias.
+- Telegram: o webhook só aceita chats autorizados e valida `X-Telegram-Bot-Api-Secret-Token`; `update_id` é deduplicado no store. O briefing é protegido por `CRON_SECRET`. O token do bot nunca deve ser registrado em logs.
+- Métricas e limites da simulação, incluindo sensibilidade e definição de horas, estão em [METRICAS.md](METRICAS.md); não há desfecho real das tratativas na base.

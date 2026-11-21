@@ -1,29 +1,49 @@
-# Registro de alterações assistidas por IA
+# Registro de trabalho assistido por IA
 
-## 2026-11-21 — Ações persistidas e integração honesta
+## 2026-11-21 — Tarefa A: motor, higiene e API
 
-- **Pedido:** criar ciclo de vida de ações, store Upstash com fallback em memória, persistência dos estados e auditoria, aprovação via API, atualizar fila após execução, esclarecer efeitos simulados e separar os painéis da interface.
-- **Correção durante a tarefa:** a interface anterior registrava aprovação apenas em estado React e usava rótulos de resolução sem efeito persistido. Substituí isso por transições validadas, gravação no store, recarga do histórico via API e estados honestos. Corrigi tipos e integrações encontrados na compilação incremental.
-- **Decisão:** conforme escolha do usuário, um aviso Zero-Touch simulado move o pedido para `em_tratativa`: a alteração da fila é real e persistida; o envio de mensagem continua simulado. Aprovações exigidas ficam pendentes até decisão persistida.
-- **Validação:** cobertura de ciclo, memória sem credenciais, mudança de estado/fila e idempotência; testes, lint e build passaram. Sem credenciais Upstash, os dados duram enquanto o processo de memória estiver ativo (até sete dias de TTL lógico).
+- **Problema → causa:** prazo exibido em dias corridos → a regra não considerava preparação e SLA em dias úteis.
+- **Correção:** cálculo com calendário útil e feriados oficiais; o teste foi atualizado para refletir a preparação parametrizada.
+- **Lição:** datas prometidas precisam ser calculadas pelo mesmo motor e calendário usados na operação.
+- **Problema → causa:** pedidos duplicados inflavam fila e valores → identificadores repetidos eram tratados como pedidos distintos.
+- **Correção:** deduplicação no preparo do snapshot e fixture de teste.
+- **Lição:** validar a chave de negócio antes de somar qualquer impacto.
+- **Problema → causa:** probabilidade de cancelamento de ruptura sem fonte → a regra usava um número inventado.
+- **Correção:** parâmetros centralizados e identificados como dado oficial ou premissa; riscos sem fonte foram removidos ou derivados.
+- **Lição:** toda constante de negócio precisa de origem explícita e sensibilidade quando for premissa.
+- **Problema → causa:** mojibake em prompts, dados de demonstração e documentação → conversão de texto inconsistente.
+- **Correção:** strings revisadas em UTF-8, dataset de demonstração regenerado e verificação automatizada adicionada.
+- **Lição:** validar codificação também é parte da qualidade dos dados.
+- **Problema → causa:** constantes sem origem e valores fixos no motor → hipóteses estavam escondidas em código e benchmark.
+- **Correção:** parâmetros documentados em `lib/params.ts`; valores sem justificativa foram derivados dos dados ou retirados.
+- **Lição:** fórmulas e premissas devem ser auditáveis fora da implementação.
 
-## 2026-11-21 — Endurecimento do motor, higiene e proteção de API
+## 2026-11-21 — Tarefa B: ações e persistência
 
-- **Pedido:** corrigir mojibake, centralizar e documentar parâmetros, alinhar cálculos financeiros à margem, separar causas-raiz, expirar pagamentos, gerar burn-down, criar fixture/testes/CI, limitar chamadas à API e ampliar o hash anonimizado.
-- **Correção durante a tarefa:** um teste inicial esperava a promessa para terça-feira, mas o próprio SLA acrescenta um dia útil de preparação além do transporte; corrigi a expectativa para quarta-feira. O build também revelou um tipo de aprovação desatualizado após tornar explícito que a aprovação só existe na sessão; atualizei o tipo e validei novamente.
-- **Decisão:** valores sem origem financeira demonstrável foram removidos ou derivados dos dados. O prazo usa um dia útil de preparação como premissa editável. Aprovações e lotes são apresentados como preparados/registrados na sessão, pois nenhuma ação é persistida em sistema externo.
-- **Validação:** `npm test`, `npm run lint` e `npm run build` passaram; o teste automatizado de mojibake passou. A demo e fixture são sintéticas. O snapshot privado local permaneceu ignorado pelo Git.
+- **Problema → causa:** a interface dizia “resolvido” sem efeito persistido → ações e aprovações viviam apenas no estado do navegador.
+- **Correção:** ciclo de vida de Actions, store com Upstash e fallback em memória, atualização da fila e rótulos de efeito honesto.
+- **Lição:** estado interno persistido, mensagem enviada e problema resolvido são fatos diferentes.
+- **Decisão:** conforme escolha do usuário, Zero-Touch move o pedido para `em_tratativa`, sem declarar resolução externa.
 
-## 2026-11-21 — Laço de trabalho e especialistas do agente
+## 2026-11-21 — Tarefa C: orquestração e especialistas
 
-- **Pedido:** substituir a chamada de ferramenta única por orquestração limitada, papéis especialistas, ferramentas persistidas, escalada humana, validação numérica, fallback determinístico, trilha visível e testes com LLM mockado.
-- **Correção durante a tarefa:** o primeiro build apontou um campo `objective` fora do schema `objetivo`; corrigi o mapeamento. A revisão também mostrou que o Zero-Touch poderia incluir pedidos com alçada e que o fallback não anexava a trilha às ações: filtrei a alçada antes da execução e persisti a trilha em cada ação gerada.
-- **Decisão:** cada pedido de plano usa seis rodadas no máximo; a demonstração sem chave roda a sequência determinística com as mesmas tools. A recomendação de resolução compara reenvio (CMV + frete + contato + LTV), reembolso (valor pago + contato + LTV) e aguardar (EV_Risco), usando somente valores do motor. Casos com alçada ficam pendentes para o papel humano responsável.
-- **Validação:** testes mockados cobrem limite do loop, escalada sem efeito de estado, remoção de números não verificados e plano determinístico com Zero-Touch, duas escaladas, dossiê e chamado pendente.
+- **Problema → causa:** agente roteava uma ferramenta e o modelo não tinha fluxo de trabalho nem contexto adequado → implementação de uma única chamada.
+- **Correção:** loop limitado, papéis especialistas, tools que consultam o motor/store, escalada humana, trilha e fallback determinístico.
+- **Problema → causa:** o primeiro build encontrou `objective` fora do schema `objetivo`; a revisão também identificou itens com alçada no lote e trilha ausente no fallback.
+- **Correção:** mapeamento alinhado, filtros de alçada e persistência da trilha nas Actions.
+- **Decisão:** comparação de opções segue a regra confirmada pelo usuário; valores vêm exclusivamente do motor. Casos de alçada aguardam aprovação.
 
-## 2026-11-21 — Agente operacional no Telegram
+## 2026-11-21 — Tarefa D: Telegram
 
-- **Pedido:** integrar bot/webhook autenticado, comandos operacionais e aprovações por botões, Zero-Touch no chat de demonstração, briefing diário, idempotência, documentação e caminho de escala para Slack/WhatsApp.
-- **Correção durante a tarefa:** o primeiro build mostrou que o `runtime` explícito conflita com o Cache Components do Next instalado; removi a configuração, mantendo o runtime Node padrão. A checagem seguinte encontrou campo de GMV com nome incorreto no snapshot do motor e o teste Vitest não resolvia aliases `@/` ao importar a rota; corrigi o campo e usei imports relativos na rota coberta.
-- **Decisão:** o webhook autoriza apenas o chat de equipe e o chat cliente de demonstração, limita comandos a 500 caracteres e persiste `update_id` com TTL de sete dias; Upstash usa chaves `SET NX EX` atômicas para deduplicação. `/causas` exibe as sete causas atuais do motor. Mensagens Zero-Touch só são marcadas como efeito real no Telegram após envio confirmado; envios parciais registram quantidades enviadas e pendentes.
-- **Validação:** 24 testes passaram; cobrem escaping MarkdownV2, deduplicação, envio por marca, efeito real Zero-Touch persistido, callback de aprovação no store compartilhado e resposta 503 sem configuração. `npm run lint` e `npm run build` passaram. O primeiro build revelou uma incompatibilidade de runtime com Cache Components, corrigida antes da validação final.
+- **Problema → causa:** webhook e callbacks precisavam compartilhar autenticação, estado e idempotência; primeiro build também conflitou com runtime explícito e Cache Components.
+- **Correção:** runtime Node padrão, secret token, autorização de chats, `update_id` com TTL, ações compartilhadas e escaping MarkdownV2.
+- **Decisão:** `/causas` exibe as sete causas atuais. Efeito real de mensagem só é registrado após confirmação do Telegram no chat de demonstração; outras integrações permanecem simuladas.
+- **Validação registrada na tarefa:** 24 testes, lint e build passaram; foi corrigida incompatibilidade de runtime e o import da rota nos testes.
+
+## 2026-11-21 — Tarefa E: defesa e métricas
+
+- **Pedido:** explicar solução e limites, calcular métricas do motor, sensibilidade, visão de implantação, pitch, sabatina e licença sem inventar números.
+- **Correção durante a tarefa:** os documentos recebidos estavam com sequências de mojibake e o log não estava cronológico; reescrevi o registro e alinhei números aos agregados reproduzíveis por `scripts/print_metrics.mjs`.
+- **Decisão:** horas são estimativas teóricas, ações autônomas não são chamadas resolvidas, e EV priorizado não é perda comprovadamente evitada. Marina é apresentada como persona representativa, não pessoa entrevistada. Sensibilidades são cenários, não fatos.
+- **Lição:** a defesa deve distinguir cálculo, efeito persistido e resultado operacional observado.
+- **Validação:** `npm run metrics` imprimiu apenas agregados do snapshot local; `npm run metrics -- --demo` confirmou execução sem snapshot privado. `npm test` passou com 24 testes, `npm run lint` passou e `npm run build` passou. A busca por sequências de mojibake nos arquivos de código e documentação retornou vazia.

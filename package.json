@@ -1,5 +1,7 @@
 {
-  "name": "gogroup-ops-agent",
+  "name": "gogroup-operations-control-tower",
+  "description": "Torre de Controle AI-First para operações de pedidos GoGroup, com motor determinístico, agente orquestrado e trilha auditável.",
+  "license": "MIT",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -7,7 +9,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "metrics": "node scripts/print_metrics.mjs",
+    "telegram:webhook": "node scripts/set_telegram_webhook.mjs"
   },
   "dependencies": {
     "groq-sdk": "^1.6.0",
