@@ -10,7 +10,7 @@ export type Order = {
 };
 export type EngineParams = { capacidadeDiaria?: number; probAbandonoPagamento?: number; tetoRuptura?: number; routes?: Route[] };
 export type Route = { transportadora?: string; uf_atendida?: string; sla_contratado_dias_uteis?: number | string; custo_medio_frete?: number | string };
-export type EnrichedOrder = Order & { valor: number; isVip: boolean; data_prometida_real: string; dias_atraso_uteis: number; cmv: number; margem: number; custo_reenvio: number; custo_reembolso: number; custo_contato: number; probCancel: number; perda_ltv_12m: number; isZeroTouch: boolean; zeroTouchAction: string | null; requerAlcadaHumana: boolean; evRisco: number };
+export type EnrichedOrder = Order & { valor: number; estadoAtual: 'aberto'; isVip: boolean; data_prometida_real: string; dias_atraso_uteis: number; cmv: number; margem: number; custo_reenvio: number; custo_reembolso: number; custo_contato: number; probCancel: number; perda_ltv_12m: number; isZeroTouch: boolean; zeroTouchAction: string | null; requerAlcadaHumana: boolean; evRisco: number };
 export const REFERENCE_DATE = BUSINESS.referenceDate;
 const num = (v: unknown, fallback = 0) => { const n = Number(v); return Number.isFinite(n) ? n : fallback; };
 const plusDay = (date: string) => { const d = new Date(`${date}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); };
@@ -37,7 +37,7 @@ export function calculateOrder(order: Order, params: Required<Omit<EngineParams,
   else if (type === 'item_faltante') ev = Math.max(margem - BUSINESS.itemMissingReshipShare * custoReenvio, 0) + BUSINESS.contactCost + perda;
   else if (['rastreio_parado','devolvido_transportadora'].includes(type)) ev = Math.max(probCancel, BUSINESS.trackingRiskFloor) * margem + BUSINESS.contactCost + perda;
   if (!Number.isFinite(ev)) ev = 0;
-  return { ...order, valor, margem, isVip, data_prometida_real: promised, dias_atraso_uteis: atraso, cmv, custo_reenvio: custoReenvio, custo_reembolso: type === 'pagamento_pendente' && expiredPayment ? 0 : valor, custo_contato: BUSINESS.contactCost, probCancel, perda_ltv_12m: perda, isZeroTouch, zeroTouchAction: action, requerAlcadaHumana: isVip || valor > BUSINESS.approvalValueThreshold || type === 'ruptura_pos_venda', evRisco: ev };
+  return { ...order, valor, estadoAtual: 'aberto', margem, isVip, data_prometida_real: promised, dias_atraso_uteis: atraso, cmv, custo_reenvio: custoReenvio, custo_reembolso: type === 'pagamento_pendente' && expiredPayment ? 0 : valor, custo_contato: BUSINESS.contactCost, probCancel, perda_ltv_12m: perda, isZeroTouch, zeroTouchAction: action, requerAlcadaHumana: isVip || valor > BUSINESS.approvalValueThreshold || type === 'ruptura_pos_venda', evRisco: ev };
 }
 export function runEngine(orders: Order[], input: EngineParams = {}) {
   const requestedCapacity = input.capacidadeDiaria ?? BUSINESS.dailyCapacity;

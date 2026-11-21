@@ -1,5 +1,12 @@
 # Registro de alterações assistidas por IA
 
+## 2026-11-21 — Ações persistidas e integração honesta
+
+- **Pedido:** criar ciclo de vida de ações, store Upstash com fallback em memória, persistência dos estados e auditoria, aprovação via API, atualizar fila após execução, esclarecer efeitos simulados e separar os painéis da interface.
+- **Correção durante a tarefa:** a interface anterior registrava aprovação apenas em estado React e usava rótulos de resolução sem efeito persistido. Substituí isso por transições validadas, gravação no store, recarga do histórico via API e estados honestos. Corrigi tipos e integrações encontrados na compilação incremental.
+- **Decisão:** conforme escolha do usuário, um aviso Zero-Touch simulado move o pedido para `em_tratativa`: a alteração da fila é real e persistida; o envio de mensagem continua simulado. Aprovações exigidas ficam pendentes até decisão persistida.
+- **Validação:** cobertura de ciclo, memória sem credenciais, mudança de estado/fila e idempotência; testes, lint e build passaram. Sem credenciais Upstash, os dados duram enquanto o processo de memória estiver ativo (até sete dias de TTL lógico).
+
 ## 2026-11-21 — Endurecimento do motor, higiene e proteção de API
 
 - **Pedido:** corrigir mojibake, centralizar e documentar parâmetros, alinhar cálculos financeiros à margem, separar causas-raiz, expirar pagamentos, gerar burn-down, criar fixture/testes/CI, limitar chamadas à API e ampliar o hash anonimizado.

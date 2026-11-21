@@ -4,11 +4,15 @@ import path from 'node:path';
 import { addBusinessDaysAfter, businessDaysBetween, calculateOrder, runEngine, type Order } from '../lib/engine';
 import { BUSINESS } from '../lib/params';
 import { checkAgentRateLimit } from '../lib/ratelimit';
+import { transitionAction, type Action } from '../lib/actions';
+import { createActionStore, executeActionEffect, MemoryActionStore } from '../lib/store';
+import { executeDeterministic, filterActiveOrders } from '../lib/tools';
 
 const fixture = JSON.parse(readFileSync('data/fixtures/synthetic.json', 'utf8')) as { orders: Order[]; routes: unknown[] };
 const deduplicated = [...new Map(fixture.orders.map(order => [order.order_id, order])).values()];
 const params = { capacidadeDiaria: BUSINESS.dailyCapacity, probAbandonoPagamento: BUSINESS.paymentAbandonmentProbability, tetoRuptura: BUSINESS.stockoutRiskFloor };
 const base: Order = { order_id: 'GC-0001', customer_id: 'CLI-0001', data_pedido: '2026-09-04', valor: 100, tipo_excecao: 'item_faltante', sla_contratado_dias_uteis: 1, custo_medio_frete: 12, receita_acumulada: 1000, n_pedidos: 2 };
+const action: Action = { id: 'action-test', orderIds: ['GC-0001'], tipo: 'zero_touch_aviso', status: 'proposta', responsavel: 'agente', canal: 'ui', impactoBrl: 20, horasLiberadas: 0.2, justificativa: 'Teste de ciclo.', calculo: { evBrl: 20 }, criadaEm: '2026-11-21T00:00:00.000Z', atualizadaEm: '2026-11-21T00:00:00.000Z', efeito: { tipo: 'simulado', descricao: 'Aviso simulado.', sistema: 'WhatsApp Business API' } };
 
 describe('motor determinístico com fixture sintética', () => {
   it('conta dias úteis excluindo fim de semana e feriados', () => {
@@ -52,6 +56,42 @@ describe('motor determinístico com fixture sintética', () => {
     for (let call = 0; call < BUSINESS.agentRequestsPerWindow; call++) expect(checkAgentRateLimit(ip, now + call).allowed).toBe(true);
     expect(checkAgentRateLimit(ip, now + BUSINESS.agentRequestsPerWindow).allowed).toBe(false);
     expect(checkAgentRateLimit(ip, now + BUSINESS.agentRateLimitWindowMs + 1).allowed).toBe(true);
+  });
+  it('valida o ciclo de vida da ação e rejeita saltos de etapa', () => {
+    const waiting = transitionAction(action, 'aguardando_aprovacao', 'agente');
+    const approved = transitionAction(waiting, 'aprovada', 'humano');
+    const executed = transitionAction(approved, 'executada', 'humano');
+    expect(executed.status).toBe('executada');
+    expect(() => transitionAction(action, 'executada', 'agente')).toThrow('Transição inválida');
+  });
+  it('usa memória automaticamente sem credenciais Upstash', () => {
+    expect(createActionStore({}).kind).toBe('memory');
+  });
+  it('persiste estado em tratativa, exclui da fila ativa e não duplica a ação', async () => {
+    const store = new MemoryActionStore();
+    const created = await store.createAction(action);
+    const repeated = await store.createAction(action);
+    expect(created.created).toBe(true);
+    expect(repeated.created).toBe(false);
+    const approved = transitionAction(transitionAction(action, 'aguardando_aprovacao', 'agente'), 'aprovada', 'humano');
+    await executeActionEffect(approved, store);
+    await executeActionEffect(approved, store);
+    const states = await store.getOrderStates();
+    expect(states['GC-0001']).toBe('em_tratativa');
+    expect(filterActiveOrders([{ ...base, order_id: 'GC-0001' }, { ...base, order_id: 'GC-0002' }], states).map(order => order.order_id)).toEqual(['GC-0002']);
+    expect(await store.listActions()).toHaveLength(1);
+    expect(await store.listAudit()).toHaveLength(1);
+  });
+  it('executar novamente o mesmo lote Zero-Touch não duplica a ação', async () => {
+    const store = new MemoryActionStore();
+    const order: Order = { ...base, order_id: 'GC-ZT-1', tipo_excecao: 'atraso_entrega', data_pedido: '2026-09-25', data_entrega: '2026-09-28', receita_acumulada: 0 };
+    const dataset = { orders: [order] };
+    const first = await executeDeterministic('executar_lote_zero_touch', { categoria: 'todos' }, dataset, 'ui', store);
+    const second = await executeDeterministic('executar_lote_zero_touch', { categoria: 'todos' }, dataset, 'ui', store);
+    expect(first.action?.status).toBe('executada');
+    expect(second.action).toBeNull();
+    expect(await store.listActions()).toHaveLength(1);
+    expect((await store.getOrderStates())['GC-ZT-1']).toBe('em_tratativa');
   });
   it('não contém mojibake no código nem nos datasets de demonstração', () => {
     const bad = [String.fromCharCode(0xc3, 0xa9), String.fromCharCode(0xc3, 0xa1), String.fromCharCode(0xc3, 0xa7)];
