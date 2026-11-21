@@ -11,11 +11,12 @@ const routes = [
   { transportadora: 'Veloz Log', uf_atendida: 'BA', sla_contratado_dias_uteis: 6, custo_medio_frete: 23 },
   { transportadora: 'Entrega Já', uf_atendida: 'BA', sla_contratado_dias_uteis: 5, custo_medio_frete: 26.45 },
 ];
+// SKUs de regra, citados no motor: KSH-1010 exercita ruptura; APC-1067 exercita vazamento no lote L2607-B.
 const demo = Array.from({ length: 60 }, (_, i) => ({
   order_id: `GC-${String(i + 1).padStart(4, '0')}`, customer_id: `CLI-${String((i * 137) % 10000).padStart(8, '0')}`,
   marca: i % 11 === 8 ? 'Lescent' : i % 2 ? 'GoBeauté' : 'Gocase', data_pedido: `2026-09-${String((i % 20) + 1).padStart(2, '0')}`,
   valor: 80 + (i * 17 % 240), sku: i % 11 === 3 ? 'KSH-1010' : i % 11 === 9 ? 'APC-1067' : `DEMO-${String(i + 1).padStart(3, '0')}`,
-  descricao_produto: 'Produto demonstrativo fictício', qtd_itens: 1 + i % 4, brinde_no_pedido: i % 3 === 0,
+  descricao_produto: `Produto demonstrativo fictício ${String(i + 1).padStart(3, '0')}`, qtd_itens: 1 + i % 4, brinde_no_pedido: i % 3 === 0,
   tipo_excecao: types[i % types.length], status: ['aberta','em_analise','aguardando_transportadora'][i % 3],
   transportadora: ['Rota Express','Veloz Log','Entrega Já','Carga Norte'][i % 4], uf: ['SP','BA','CE','RJ','PE','RN'][i % 6], cidade: 'Cidade Fictícia',
   data_prometida: `2026-09-${String((i % 20) + 1).padStart(2,'0')}`, data_entrega: i % 4 === 0 ? `2026-09-${String(Math.min(28,(i % 20)+3)).padStart(2,'0')}` : null,
@@ -26,6 +27,11 @@ const demo = Array.from({ length: 60 }, (_, i) => ({
 }));
 demo.push({ ...demo[0], order_id: 'GC-0061', status: 'aguardando_cliente' });
 fs.writeFileSync(path.join(dataDir, 'demo_fallback.json'), JSON.stringify({ orders: demo.slice(0, 60), routes }, null, 2), 'utf8');
+
+if (process.argv.includes('--demo-only')) {
+  console.log(`Demo sintética regenerada: ${demo.length - 1} pedidos; snapshot privado preservado.`);
+  process.exit(0);
+}
 
 if (!fs.existsSync(path.join(dataDir, 'raw', 'pedidos_excecao.csv'))) {
   console.log(`Demo sintética: ${demo.length - 1} pedidos; snapshot privado não regenerado (CSV ausente).`);
