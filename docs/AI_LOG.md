@@ -54,3 +54,12 @@
 - **Decisão:** expor health sem segredos, mostrar o tipo de armazenamento, e oferecer reset com confirmação e rate limit. O reset limpa os dados operacionais e os identificadores de update sob o prefixo da demo, preservando somente o registro auditável do próprio reset. A fila volta ao dataset-base e a interface indica que ainda não há ações.
 - **Lição:** demonstração compartilhada precisa de estado visível e um caminho explícito para restaurar o cenário, com o impacto sobre todos os visitantes informado antes da ação.
 - **Validação:** health foi confirmado dinâmico conforme a documentação local do Next 16 com Cache Components. `npm test` passou com 27 testes, lint e build passaram. `npm run smoke -- http://127.0.0.1:3000` passou nas cinco etapas; o teste local leu 2.000 pedidos e o reset terminou com zero ações e estados.
+
+## 2026-11-21 — Tarefas G/G2: auditoria e publicação
+
+- **Pedido:** auditar histórico, segredos e dados sintéticos antes de publicar; corrigir SKUs/descrições sem quebrar causas-raiz; ajustar titular da licença e registrar a tarefa.
+- **Problema → causa:** a primeira auditoria de publicação encontrou SKUs e descrições de demonstração sem o padrão fictício pedido. Uma execução intermediária do verificador também marcou as descrições como inválidas porque a codificação do terminal alterou o acento usado na expressão de comparação; a auditoria foi repetida com código Unicode e o teste unitário confirmou o padrão.
+- **Correção:** os geradores preservam `APC-1067` somente no caso de vazamento do lote `L2607-B` e `KSH-nnnn` somente em ruptura; os demais SKUs usam `DEMO-nnn` e as descrições são genéricas e numeradas. O snapshot privado foi preservado e não foi impresso.
+- **Verificação e resultado:** comparação na combinação data do pedido, valor, SKU, UF e transportadora encontrou zero colisões nos dois datasets. Histórico sem arquivos brutos/privados ou `.env*`, `git grep` sem padrões de segredo e dados sem campos de nome/email. `npm test` passou com 29 testes, lint e build passaram.
+- **Decisão sobre a licença:** conforme instrução do usuário, o titular foi alterado de GoGroup para Tiago Saturnino, mudando somente essa linha. Os commits de fixtures e licença foram enviados para `origin/main` sem force; o registro desta auditoria foi commitado separadamente.
+- **Lição:** a checagem precisa cobrir a história do Git e as combinações de dados, enquanto as exceções de teste devem ser estreitas, documentadas e exercitadas por teste.
