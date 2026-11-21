@@ -1,0 +1,27 @@
+# Metodologia e parâmetros do motor
+
+## Critério financeiro
+
+- Margem de contribuição: `valor do pedido × (1 − CMV)`. CMV de 24%: dado oficial do enunciado.
+- Custo de reenvio: `valor × CMV + custo médio de frete` informado no pedido/rota.
+- LTV em risco: `queda de recompra × taxa de recompra × (receita acumulada / número de pedidos) × (1 − CMV)`. Queda de 50%, recompra VIP de 70% e regular de 28%: dados oficiais do enunciado. A conversão para margem aplica o critério único do motor.
+- Probabilidade de cancelamento por atraso: até 2 dias úteis 4%, até 5 dias 10%, até 10 dias 22%, acima de 10 dias 40%; dados oficiais do enunciado.
+- EV por atraso entregue: custo oficial de contato + perda de LTV.
+- Pagamento em cobrança: probabilidade parametrizada de abandono × margem. Abandono padrão de 30%: PREMISSA NOSSA.
+- Pagamento expirado: custo de reembolso e EV iguais a zero; expiração após mais de 5 dias úteis: PREMISSA NOSSA.
+- Endereço divergente: probabilidade de cancelamento × margem + contato + LTV em risco.
+- Ruptura: máximo entre probabilidade de cancelamento e piso de 40%, multiplicado pela margem, mais contato e LTV. Piso de 40%: PREMISSA NOSSA.
+- Extravio, avaria, vazamento e personalização: máximo entre margem menos custo de reenvio e zero, mais contato e LTV.
+- Item faltante: máximo entre margem menos 40% do custo de reenvio e zero, mais contato e LTV. Fração de 40%: PREMISSA NOSSA.
+- Rastreio parado/devolução: máximo entre probabilidade de cancelamento e piso de 22%, multiplicado pela margem, mais contato e LTV. Piso de 22%: PREMISSA NOSSA.
+- Economia estimada de causa-raiz: soma do EV dos pedidos afetados, limitada ao GMV exposto do grupo. Não representa economia realizada.
+- Prazo real: data do pedido acrescida de 1 dia útil de preparação (PREMISSA NOSSA) e do SLA contratado em dias úteis. Feriados 07/09 e 12/10: dados oficiais do enunciado.
+- Data de referência do motor: 30/09/2026, informada pela base do desafio.
+- Burn-down: pedidos ordenados por FIFO (data de abertura, depois data do pedido) ou EV decrescente; processamento diário em lotes da capacidade parametrizada. EV acumulado é a soma dos EV dos pedidos processados até aquele dia.
+- Zero-Touch: 12 minutos humanos poupados por caso; capacidade de 150/dia e 12 minutos/caso: dados oficiais do enunciado.
+
+## Constantes e origens
+
+As constantes centralizadas estão em `lib/params.ts`. Dados oficiais: CMV 24%, capacidade 150/dia, 12 minutos/caso, contato R$ 9, faixas de cancelamento 4%/10%/22%/40%, recompra VIP 70% e regular 28%, queda de 50%, feriados 07/09 e 12/10 e limite VIP R$ 1.500. Premissas nossas editáveis: preparação de 1 dia útil, expiração de pagamento em 5 dias úteis, abandono 30%, piso de ruptura 40%, alçada acima de R$ 250, fração de reenvio de item faltante 40% e piso de rastreio/devolução 22%. O limite de uso é 20 chamadas por 10 minutos e 500 caracteres por mensagem, conforme especificado na tarefa.
+
+Os custos de frete de benchmark vêm das rotas recebidas com o dataset; se não houver tarifa da Rota Express na região Nordeste, o benchmark não é exibido. Nenhum benchmark ou economia é apresentado como resultado persistido.
