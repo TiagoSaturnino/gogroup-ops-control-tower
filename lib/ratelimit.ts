@@ -18,8 +18,11 @@ export class MemoryRateLimitStore implements RateLimitStore {
 }
 
 const store: RateLimitStore = new MemoryRateLimitStore();
+export function checkRateLimit(key: string, limit: number, windowMs: number, now = Date.now()) {
+  return store.consume(key, now, windowMs, limit);
+}
 export function checkAgentRateLimit(ip: string, now = Date.now()) {
-  return store.consume(ip, now, BUSINESS.agentRateLimitWindowMs, BUSINESS.agentRequestsPerWindow);
+  return checkRateLimit(`agent:${ip}`, BUSINESS.agentRequestsPerWindow, BUSINESS.agentRateLimitWindowMs, now);
 }
 import { BUSINESS } from './params';
 

@@ -47,3 +47,10 @@
 - **Decisão:** horas são estimativas teóricas, ações autônomas não são chamadas resolvidas, e EV priorizado não é perda comprovadamente evitada. Marina é apresentada como persona representativa, não pessoa entrevistada. Sensibilidades são cenários, não fatos.
 - **Lição:** a defesa deve distinguir cálculo, efeito persistido e resultado operacional observado.
 - **Validação:** `npm run metrics` imprimiu apenas agregados do snapshot local; `npm run metrics -- --demo` confirmou execução sem snapshot privado. `npm test` passou com 24 testes, `npm run lint` passou e `npm run build` passou. A busca por sequências de mojibake nos arquivos de código e documentação retornou vazia.
+
+## 2026-11-21 — Tarefa F: demonstração compartilhada
+
+- **Problema → causa:** avaliadores na demo pública compartilham estado do store, então ações e estados de pedidos de uma sessão podem afetar a fila de outra; sem um indicador, também não fica claro se o estado sobreviverá ao processo.
+- **Decisão:** expor health sem segredos, mostrar o tipo de armazenamento, e oferecer reset com confirmação e rate limit. O reset limpa os dados operacionais e os identificadores de update sob o prefixo da demo, preservando somente o registro auditável do próprio reset. A fila volta ao dataset-base e a interface indica que ainda não há ações.
+- **Lição:** demonstração compartilhada precisa de estado visível e um caminho explícito para restaurar o cenário, com o impacto sobre todos os visitantes informado antes da ação.
+- **Validação:** health foi confirmado dinâmico conforme a documentação local do Next 16 com Cache Components. `npm test` passou com 27 testes, lint e build passaram. `npm run smoke -- http://127.0.0.1:3000` passou nas cinco etapas; o teste local leu 2.000 pedidos e o reset terminou com zero ações e estados.

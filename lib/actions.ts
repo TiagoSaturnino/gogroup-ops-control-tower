@@ -23,7 +23,7 @@ export type OrderState = 'aberto' | 'em_tratativa' | 'resolvido' | 'cancelado';
 export type AuditRecord = {
   id: string;
   actionId: string;
-  evento: 'criada' | 'aprovada' | 'rejeitada' | 'executada' | 'texto_corrigido';
+  evento: 'criada' | 'aprovada' | 'rejeitada' | 'executada' | 'texto_corrigido' | 'demo_reiniciada';
   responsavel: 'agente' | 'humano';
   ocorridaEm: string;
   descricao: string;

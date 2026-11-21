@@ -21,6 +21,7 @@ export interface ActionStore {
   releaseTelegramUpdate(updateId: string): Promise<void>;
   claimTelegramOperation(operationId: string): Promise<boolean>;
   releaseTelegramOperation(operationId: string): Promise<void>;
+  resetDemo(record: AuditRecord): Promise<void>;
 }
 
 abstract class DataStore implements ActionStore {
@@ -66,6 +67,7 @@ abstract class DataStore implements ActionStore {
     return claimed;
   }
   async releaseTelegramOperation(operationId: string) { await this.mutate(data => { data.telegramOperations = data.telegramOperations.filter(id => id !== operationId); }); }
+  async resetDemo(record: AuditRecord) { await this.mutate(data => { Object.assign(data, emptyData(), { audit: [record] }); }); }
 
   private async mutate(change: (data: StoreData) => void) {
     const run = this.queue.then(async () => { const data = await this.read(); change(data); await this.write(data); });
@@ -89,19 +91,28 @@ export class UpstashActionStore extends DataStore {
   readonly kind = 'upstash' as const;
   constructor(private readonly url: string, private readonly token: string) { super(); }
 
-  private async command(args: string[]) {
+  private async command(args: string[]): Promise<unknown> {
     const response = await fetch(this.url, { method: 'POST', headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(args), cache: 'no-store' });
     if (!response.ok) throw new Error(`Upstash REST respondeu ${response.status}`);
-    const payload = await response.json() as { result?: string | null; error?: string };
+    const payload = await response.json() as { result?: unknown; error?: string };
     if (payload.error) throw new Error(payload.error);
     return payload.result;
   }
   protected async read() {
     const raw = await this.command(['GET', PREFIX]);
-    if (!raw) return emptyData();
+    if (typeof raw !== 'string' || !raw) return emptyData();
     try { return { ...emptyData(), ...JSON.parse(raw) as Partial<StoreData> }; } catch { return emptyData(); }
   }
   protected async write(data: StoreData) { await this.command(['SET', PREFIX, JSON.stringify(data), 'EX', String(TTL_SECONDS)]); }
+  async resetDemo(record: AuditRecord) {
+    const keys = await this.command(['KEYS', `${PREFIX}:telegram:*`]);
+    if (Array.isArray(keys)) {
+      const telegramKeys = keys.filter((key): key is string => typeof key === 'string');
+      if (telegramKeys.length) await this.command(['DEL', ...telegramKeys]);
+    }
+    await this.command(['DEL', PREFIX]);
+    await this.write({ ...emptyData(), audit: [record] });
+  }
   private telegramKey(kind: string, id: string) { return `${PREFIX}:telegram:${kind}:${createHash('sha256').update(id).digest('hex')}`; }
   async claimTelegramUpdate(updateId: string) { return (await this.command(['SET', this.telegramKey('update', updateId), '1', 'NX', 'EX', String(TTL_SECONDS)])) === 'OK'; }
   async releaseTelegramUpdate(updateId: string) { await this.command(['DEL', this.telegramKey('update', updateId)]); }

@@ -11,6 +11,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "metrics": "node scripts/print_metrics.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "telegram:webhook": "node scripts/set_telegram_webhook.mjs"
   },
   "dependencies": {
