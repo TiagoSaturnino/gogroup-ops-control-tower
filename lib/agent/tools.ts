@@ -5,6 +5,8 @@ import type { EnrichedOrder } from '../engine';
 import { BUSINESS } from '../params';
 import { dashboard, executeDeterministic, loadDataset, type Dataset } from '../tools';
 import { executeActionEffect, getActionStore, type ActionStore } from '../store';
+import { sendZeroTouchTelegram } from '../telegram-api';
+import { compareResolutionOptions } from '../resolution';
 
 const recommendation: Record<string,string> = {
   bug_checkout: 'Corrigir o cálculo de promessa e monitorar os pedidos afetados.', cd2_turno_noite: 'Auditar conferência e separação de brindes no CD2 à noite.',
@@ -22,17 +24,6 @@ const causeMatch = (id:string, order:EnrichedOrder) => {
   if(id==='ruptura_kokeshi') return order.tipo_excecao==='ruptura_pos_venda'&&(order.sku??'').startsWith('KSH-');
   return false;
 };
-
-function comparison(row:EnrichedOrder) {
-  const contact=row.custo_contato, ltv=row.perda_ltv_12m;
-  const options=[
-    {option:'reenvio',costBrl:row.custo_reenvio+contact+ltv,components:{cmvAndFreightBrl:row.custo_reenvio,contactBrl:contact,ltvRiskBrl:ltv}},
-    {option:'reembolso',costBrl:row.custo_reembolso+contact+ltv,components:{amountPaidBrl:row.custo_reembolso,contactBrl:contact,ltvRiskBrl:ltv}},
-    {option:'aguardar',costBrl:row.evRisco,components:{expectedLossBrl:row.evRisco,probabilityCancel:row.probCancel,ltvRiskBrl:ltv}},
-  ].map(option=>({...option,costBrl:Number(option.costBrl.toFixed(2))}));
-  const recommended=options.reduce((best,item)=>item.costBrl<best.costBrl?item:best,options[0]);
-  return {orderId:row.order_id,paidBrl:row.valor,marginBrl:row.margem,options,recommended:recommended.option,reason:`Menor custo estimado no motor: ${recommended.option}.`};
-}
 
 function actionId(tool:string, data:unknown) { return createHash('sha256').update(`${tool}|${JSON.stringify(data)}`).digest('hex').slice(0,24); }
 async function persistRecord(input:{tool:string;type:ActionType;ids:string[];args:Record<string,unknown>;summary:string;calculation:Record<string,number|string|boolean|null>;system:string;simulated:boolean;needsApproval?:boolean;store:ActionStore;markOrders?:boolean}) {
@@ -76,7 +67,7 @@ export async function runAgentTool(name:string,args:Record<string,unknown>,data:
       return {summary:`Dossiê consultado pelo motor para ${row.order_id}.`,pedido:detail,action};
     }
     if(name==='comparar_opcoes_resolucao') {
-      const result=comparison(row),action=await persistRecord({tool:name,type:'comparacao',ids:[row.order_id],args:{id:row.order_id},summary:result.reason,calculation:{evBrl:row.evRisco,valorPagoBrl:row.valor,reenvioBrl:result.options[0].costBrl,reembolsoBrl:result.options[1].costBrl,aguardarBrl:result.options[2].costBrl,perdaLtvBrl:row.perda_ltv_12m,recomendacao:result.recommended},system:'GoGroup Ops',simulated:false,store});
+      const result=compareResolutionOptions(row),action=await persistRecord({tool:name,type:'comparacao',ids:[row.order_id],args:{id:row.order_id},summary:result.reason,calculation:{evBrl:row.evRisco,valorPagoBrl:row.valor,reenvioBrl:result.options[0].costBrl,reembolsoBrl:result.options[1].costBrl,aguardarBrl:result.options[2].costBrl,perdaLtvBrl:row.perda_ltv_12m,recomendacao:result.recommended},system:'GoGroup Ops',simulated:false,store});
       return {summary:result.reason,pedido:detail,...result,action};
     }
     const objective=String(args.objetivo??'atualizar o andamento');
@@ -96,20 +87,30 @@ export async function runAgentTool(name:string,args:Record<string,unknown>,data:
   if(name==='executar_lote_zero_touch') {
     const gated=rows.filter(row=>row.isZeroTouch&&row.requerAlcadaHumana).map(row=>({orderId:row.order_id,quemDecide:ownerFor(row),motivo:row.isVip?'cliente VIP':row.tipo_excecao==='ruptura_pos_venda'?'ruptura pós-venda':'valor acima da alçada'}));
     const result=await executeDeterministic(name,{categoria:args.categoria??'todos'},data,'ui',store);
-    return {summary:result.action?`Lote autônomo processado: ${result.affectedOrderIds?.length??0} pedidos movidos para em tratativa; avisos externos simulados.`:String(result.actionExecuted),resultado:result,gatedForHuman:gated};
+    const action=result.action as Action|undefined;
+    let telegramSent=false;
+    if(action?.status==='executada') {
+      const delivery=await sendZeroTouchTelegram(action,rows.filter(row=>action.orderIds.includes(row.order_id)),store);
+      const previousSent=Number(action.calculo.telegramSentCount??0),sentCount=Math.max(previousSent,delivery.sentOrderIds.length),pendingCount=Math.max(0,action.orderIds.length-sentCount);
+      telegramSent=sentCount>0;
+      const updated={...action,calculo:{...action.calculo,telegramSentCount:sentCount,telegramPendingCount:pendingCount},...(telegramSent?{canal:'telegram' as const,efeito:{tipo:'real' as const,descricao:`${sentCount} avisos enviados ao chat de demonstração do Telegram; ${pendingCount} pendentes. Estado em tratativa persistido.`,sistema:'Telegram (canal de demonstração)'}}:{})};
+      if(telegramSent&&!action.calculo.telegramSentCount) await store.appendAudit({id:`${action.id}:telegram-notification`,actionId:action.id,evento:'executada',responsavel:'agente',ocorridaEm:new Date().toISOString(),descricao:updated.efeito.descricao});
+      if(delivery.configured||telegramSent) { await store.saveAction(updated); result.action=updated; }
+    }
+    return {summary:result.action?`Lote autônomo processado: ${result.affectedOrderIds?.length??0} pedidos movidos para em tratativa; ${telegramSent?'aviso(s) enviado(s) ao Telegram de demonstração.':'avisos externos não enviados.'}`:String(result.actionExecuted),resultado:result,gatedForHuman:gated,telegramSent};
   }
   if(name==='abrir_chamado_transportadora') {
     const carrier=String(args.transportadora??''),requested=Array.isArray(args.pedidos)?args.pedidos.map(String):[];
     const affected=rows.filter(row=>row.transportadora===carrier&&(!requested.length||requested.includes(row.order_id)));
     const orderIds=affected.map(row=>row.order_id),sla=affected.map(row=>Number(row.sla_contratado_dias_uteis??0)).filter(Number.isFinite);
-    const action=await persistRecord({tool:name,type:'chamado_transportadora',ids:orderIds,args:{transportadora:carrier},summary:`Chamado para ${carrier} preparado para aprovação humana com ${orderIds.length} pedidos e evidências de rota.`,calculation:{pedidos:orderIds.length,evBrl:affected.reduce((sum,row)=>sum+row.evRisco,0),slaMinimoDiasUteis:sla.length?Math.min(...sla):0,slaMaximoDiasUteis:sla.length?Math.max(...sla):0},system:'painel da transportadora',simulated:true,needsApproval:true,store});
+    const action=await persistRecord({tool:name,type:'chamado_transportadora',ids:orderIds,args:{transportadora:carrier},summary:`Chamado para ${carrier} preparado para aprovação humana com ${orderIds.length} pedidos e evidências de rota.`,calculation:{pedidos:orderIds.length,evBrl:affected.reduce((sum,row)=>sum+row.evRisco,0),slaMinimoDiasUteis:sla.length?Math.min(...sla):0,slaMaximoDiasUteis:sla.length?Math.max(...sla):0,decisor:BUSINESS.approvalOwners.systemic,recomendacao:`Abrir chamado sobre SLA e rota com ${carrier}.`},system:'painel da transportadora',simulated:true,needsApproval:true,store});
     return {summary:`Chamado ${carrier} registrado como ação pendente de aprovação; nenhum chamado externo foi enviado.`,transportadora:carrier,pedidoIds:orderIds.slice(0,25),evidenciaSla:{menorDiasUteis:sla.length?Math.min(...sla):null,maiorDiasUteis:sla.length?Math.max(...sla):null},action};
   }
   if(name==='escalar_para_humano') {
     const orderId=String(args.id??''),row=rows.find(order=>order.order_id===orderId);
     if(!row)return {error:`Pedido ${orderId} não encontrado na fila ativa.`};
-    const costs=comparison(row),requestedConfidence=String(args.confianca??'alta'),reason=String(args.motivo??'Revisão humana solicitada'),owner=String(args.quem_deve_decidir||ownerFor(row));
-    const options=Array.isArray(args.opcoes)?args.opcoes.map(String):costs.options.map(option=>`${option.option}: R$ ${option.costBrl.toFixed(2)}`);
+    const costs=compareResolutionOptions(row),confidence=String(args.confianca??'alta'),requestedConfidence=(['baixa','media','alta'].includes(confidence)?confidence:'alta'),reason=String(args.motivo??'Revisão humana solicitada'),owner=ownerFor(row);
+    const options=costs.options.map(option=>`${option.option}: R$ ${option.costBrl.toFixed(2)}`);
     const action=await persistRecord({tool:name,type:'escalonamento',ids:[row.order_id],args:{id:row.order_id,reason,owner,requestedConfidence},summary:`${reason} Recomendo ${costs.recommended}; decisão de ${owner}.`,calculation:{evBrl:row.evRisco,valorPagoBrl:row.valor,reenvioBrl:costs.options[0].costBrl,reembolsoBrl:costs.options[1].costBrl,aguardarBrl:costs.options[2].costBrl,perdaLtvBrl:row.perda_ltv_12m,recomendacao:costs.recommended,motivo:reason,decisor:owner,confianca:requestedConfidence,opcoes:options.join(' | ')},system:'GoGroup Ops; ERP após aprovação',simulated:true,needsApproval:true,store});
     return {summary:`Escalonado para ${owner}; ação aguardando aprovação humana.`,motivo:reason,decisor:owner,confianca:requestedConfidence,opcoesCalculadas:costs,opcoesSolicitadas:options,action};
   }

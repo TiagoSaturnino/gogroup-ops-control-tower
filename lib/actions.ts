@@ -15,6 +15,7 @@ export type Action = {
   atualizadaEm: string;
   efeito: { tipo: 'real' | 'simulado'; descricao: string; sistema: string };
   trilhaAgente?: Array<{ round: number; papel: string; pensamentoResumido: string; tool: string; argumentos: Record<string, unknown>; resultado: unknown }>;
+  telegramApprovalMessageId?: number;
 };
 
 export type OrderState = 'aberto' | 'em_tratativa' | 'resolvido' | 'cancelado';

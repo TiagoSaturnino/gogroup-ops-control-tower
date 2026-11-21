@@ -1,9 +1,10 @@
 import { transitionAction, type Action, type AuditRecord, type OrderState } from './actions';
+import { createHash } from 'node:crypto';
 
 const PREFIX = 'gogroup:ops:demo:v1';
 const TTL_SECONDS = 7 * 24 * 60 * 60;
-type StoreData = { actions: Action[]; orderStates: Record<string, OrderState>; audit: AuditRecord[] };
-const emptyData = (): StoreData => ({ actions: [], orderStates: {}, audit: [] });
+type StoreData = { actions: Action[]; orderStates: Record<string, OrderState>; audit: AuditRecord[]; telegramUpdates: string[]; telegramOperations: string[] };
+const emptyData = (): StoreData => ({ actions: [], orderStates: {}, audit: [], telegramUpdates: [], telegramOperations: [] });
 
 export interface ActionStore {
   readonly kind: 'memory' | 'upstash';
@@ -16,6 +17,10 @@ export interface ActionStore {
   setOrderState(orderId: string, state: OrderState): Promise<void>;
   listAudit(): Promise<AuditRecord[]>;
   appendAudit(record: AuditRecord): Promise<void>;
+  claimTelegramUpdate(updateId: string): Promise<boolean>;
+  releaseTelegramUpdate(updateId: string): Promise<void>;
+  claimTelegramOperation(operationId: string): Promise<boolean>;
+  releaseTelegramOperation(operationId: string): Promise<void>;
 }
 
 abstract class DataStore implements ActionStore {
@@ -49,6 +54,18 @@ abstract class DataStore implements ActionStore {
   async setOrderState(orderId: string, state: OrderState) { await this.mutate(data => { data.orderStates[orderId] = state; }); }
   async listAudit() { return (await this.read()).audit.sort((a,b) => a.ocorridaEm.localeCompare(b.ocorridaEm)); }
   async appendAudit(record: AuditRecord) { await this.mutate(data => { if (!data.audit.some(item => item.id === record.id)) data.audit.push(record); }); }
+  async claimTelegramUpdate(updateId: string) {
+    let claimed = false;
+    await this.mutate(data => { if (!data.telegramUpdates.includes(updateId)) { data.telegramUpdates.push(updateId); data.telegramUpdates = data.telegramUpdates.slice(-5000); claimed = true; } });
+    return claimed;
+  }
+  async releaseTelegramUpdate(updateId: string) { await this.mutate(data => { data.telegramUpdates = data.telegramUpdates.filter(id => id !== updateId); }); }
+  async claimTelegramOperation(operationId: string) {
+    let claimed = false;
+    await this.mutate(data => { if (!data.telegramOperations.includes(operationId)) { data.telegramOperations.push(operationId); data.telegramOperations = data.telegramOperations.slice(-5000); claimed = true; } });
+    return claimed;
+  }
+  async releaseTelegramOperation(operationId: string) { await this.mutate(data => { data.telegramOperations = data.telegramOperations.filter(id => id !== operationId); }); }
 
   private async mutate(change: (data: StoreData) => void) {
     const run = this.queue.then(async () => { const data = await this.read(); change(data); await this.write(data); });
@@ -85,6 +102,11 @@ export class UpstashActionStore extends DataStore {
     try { return { ...emptyData(), ...JSON.parse(raw) as Partial<StoreData> }; } catch { return emptyData(); }
   }
   protected async write(data: StoreData) { await this.command(['SET', PREFIX, JSON.stringify(data), 'EX', String(TTL_SECONDS)]); }
+  private telegramKey(kind: string, id: string) { return `${PREFIX}:telegram:${kind}:${createHash('sha256').update(id).digest('hex')}`; }
+  async claimTelegramUpdate(updateId: string) { return (await this.command(['SET', this.telegramKey('update', updateId), '1', 'NX', 'EX', String(TTL_SECONDS)])) === 'OK'; }
+  async releaseTelegramUpdate(updateId: string) { await this.command(['DEL', this.telegramKey('update', updateId)]); }
+  async claimTelegramOperation(operationId: string) { return (await this.command(['SET', this.telegramKey('operation', operationId), '1', 'NX', 'EX', String(TTL_SECONDS)])) === 'OK'; }
+  async releaseTelegramOperation(operationId: string) { await this.command(['DEL', this.telegramKey('operation', operationId)]); }
 }
 
 type StoreGlobal = typeof globalThis & { __gogroupActionStore?: ActionStore };

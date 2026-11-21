@@ -30,6 +30,16 @@ export async function deterministicFallback(message:string,data:Dataset=loadData
     await run(6,'abrir_chamado_transportadora',{transportadora:'Rota Express',pedidos:evidence.pedidoIds??(queue.pedidos as {orderId:string;transportadora?:string}[]).filter(row=>row.transportadora==='Rota Express').map(row=>row.orderId)});
     return {modelUsed:'deterministic',text:'Plano de hoje montado: fila priorizada, Zero-Touch processado para pedidos autônomos, casos de alçada escalados, dossiê da Rota Express registrado e chamado aguardando aprovação.',steps,guardrailTriggered:false};
   }
+  if(/\bcausas\b|causa-raiz/i.test(message)) {
+    const result=await dashboard(data,{},store);
+    for(let index=0;index<result.systemic.length;index++) await run((index%6)+1,'investigar_causa',{id_causa:result.systemic[index].id});
+    return {modelUsed:'deterministic',text:`Investiguei ${result.systemic.length} causas-raiz atuais do motor com custo recorrente e evidências.`,steps,guardrailTriggered:false};
+  }
+  if(/\bfila\b|pedidos ativos/i.test(message)) {
+    const limit=Number(message.match(/limite\s+(\d+)/i)?.[1]??20);
+    await run(1,'listar_fila',{limite:Number.isFinite(limit)?limit:20,filtro:'todos'});
+    return {modelUsed:'deterministic',text:'Fila priorizada pelo EV_Risco consultada; não executei ações.',steps,guardrailTriggered:false};
+  }
   const route=/rota express|transportadora/i.test(message), lot=/l2607-b|lote/i.test(message), id=message.match(/\b(?:GC|GB)-?[A-Z0-9-]+\b/i)?.[0]?.replace(/^(GC|GB)(?!-)/,'$1-');
   if(route) {
     const investigation=await run(1,'investigar_causa',{id_causa:'rota_express_ne'}), evidence=(investigation.evidencias??{}) as {pedidoIds?:string[]};

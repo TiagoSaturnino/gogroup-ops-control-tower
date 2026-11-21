@@ -3,5 +3,11 @@
     "app/api/**/*": {
       "includeFiles": "data/private/**"
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/briefing",
+      "schedule": "0 11 * * *"
+    }
+  ]
 }
