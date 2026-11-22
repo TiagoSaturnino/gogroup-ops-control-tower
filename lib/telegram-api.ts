@@ -6,6 +6,10 @@ export function getTelegramBotConfig() {
   const { TELEGRAM_BOT_TOKEN: token, TELEGRAM_TEAM_CHAT_ID: teamChatId } = process.env;
   return token && teamChatId ? { token, teamChatId } : null;
 }
+export function getTelegramCustomerConfig() {
+  const { TELEGRAM_BOT_TOKEN: token, TELEGRAM_DEMO_CUSTOMER_CHAT_ID: demoCustomerChatId } = process.env;
+  return token && demoCustomerChatId ? { token, demoCustomerChatId } : null;
+}
 export function getTelegramConfig(): TelegramConfig | null {
   const { TELEGRAM_BOT_TOKEN: token, TELEGRAM_WEBHOOK_SECRET: secret, TELEGRAM_TEAM_CHAT_ID: teamChatId, TELEGRAM_DEMO_CUSTOMER_CHAT_ID: demoCustomerChatId } = process.env;
   return token && secret && teamChatId && demoCustomerChatId ? { token, secret, teamChatId, demoCustomerChatId } : null;
@@ -30,14 +34,23 @@ export async function answerTelegramCallback(token: string, callbackQueryId: str
   return telegramApi<boolean>(token, 'answerCallbackQuery', { callback_query_id: callbackQueryId, text: text.slice(0, 180), show_alert: false });
 }
 
-export async function sendZeroTouchTelegram(action: Action, orders: Array<{ order_id: string; marca?: string | null }>, store = getActionStore()) {
-  const config = getTelegramConfig();
+export async function sendZeroTouchTelegram(action: Action, orders: Array<{ order_id: string; marca?: string | null }>, store = getActionStore(), draftsByBrand?: Record<string, string>) {
+  const config = getTelegramCustomerConfig();
   if (!config) return { configured: false, complete: false, sentOrderIds: [] as string[] };
   const operationKey = `zero-touch-message:${action.id}`;
   const sentOrderIds: string[] = [];
   const byBrand = new Map<string, string[]>();
   for (const order of orders) { const brand = order.marca || 'GoGroup'; byBrand.set(brand, [...(byBrand.get(brand) ?? []), order.order_id]); }
   for (const [brand, ids] of byBrand) {
+    const draft = draftsByBrand?.[brand];
+    if (draft) {
+      const marker = `${operationKey}:${brand}:draft`;
+      if (!await store.claimTelegramOperation(marker)) { sentOrderIds.push(...ids); continue; }
+      try { await sendTelegramMessage(config.token, config.demoCustomerChatId, draft); }
+      catch { await store.releaseTelegramOperation(marker); return { configured: true, complete: false, sentOrderIds }; }
+      sentOrderIds.push(...ids);
+      continue;
+    }
     const chunks: string[][] = []; let chunk: string[] = [];
     for (const id of ids) {
       const candidate = [...chunk, id];

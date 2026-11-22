@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 import type { Action, ActionType } from '../actions';
 import { transitionAction } from '../actions';
-import type { EnrichedOrder } from '../engine';
+import { businessDaysBetween, type EnrichedOrder } from '../engine';
 import { BUSINESS } from '../params';
 import { dashboard, executeDeterministic, loadDataset, type Dataset } from '../tools';
 import { executeActionEffect, getActionStore, recordConsultation, type ActionStore } from '../store';
 import { sendZeroTouchTelegram } from '../telegram-api';
 import { compareResolutionOptions } from '../resolution';
+import { runCommunicationAgent, type CommunicationFacts } from './communication';
+import { recordGuardrailOccurrence } from './guardrails';
 
 const recommendation: Record<string,string> = {
   bug_checkout: 'Corrigir o cálculo de promessa e monitorar os pedidos afetados.', cd2_turno_noite: 'Auditar conferência e separação de brindes no CD2 à noite.',
@@ -26,9 +28,9 @@ const causeMatch = (id:string, order:EnrichedOrder) => {
 };
 
 function actionId(tool:string, data:unknown) { return createHash('sha256').update(`${tool}|${JSON.stringify(data)}`).digest('hex').slice(0,24); }
-async function persistRecord(input:{tool:string;type:ActionType;ids:string[];args:Record<string,unknown>;summary:string;calculation:Record<string,number|string|boolean|null>;system:string;simulated:boolean;needsApproval?:boolean;store:ActionStore;markOrders?:boolean}) {
+async function persistRecord(input:{tool:string;type:ActionType;ids:string[];args:Record<string,unknown>;summary:string;calculation:Record<string,number|string|boolean|null>;system:string;simulated:boolean;needsApproval?:boolean;store:ActionStore;markOrders?:boolean;draft?:string}) {
   const id=actionId(input.tool,{...input.args,ids:[...input.ids].sort()}),now=new Date().toISOString();
-  const action:Action={id,orderIds:[...input.ids].sort(),tipo:input.type,status:'proposta',responsavel:'agente',canal:'ui',impactoBrl:Number(input.calculation.evBrl??0),horasLiberadas:0,justificativa:input.summary,calculo:input.calculation,criadaEm:now,atualizadaEm:now,efeito:{tipo:input.simulated?'simulado':'real',descricao:input.summary,sistema:input.system}};
+  const action:Action={id,orderIds:[...input.ids].sort(),tipo:input.type,status:'proposta',responsavel:'agente',canal:'ui',impactoBrl:Number(input.calculation.evBrl??0),horasLiberadas:0,justificativa:input.summary,calculo:input.calculation,criadaEm:now,atualizadaEm:now,efeito:{tipo:input.simulated?'simulado':'real',descricao:input.summary,sistema:input.system},...(input.draft?{rascunho:input.draft}:{})};
   const created=await input.store.createAction(action);
   if(!created.created)return created.action;
   await input.store.appendAudit({id:`${id}:criada`,actionId:id,evento:'criada',responsavel:'agente',ocorridaEm:now,descricao:input.summary});
@@ -46,6 +48,22 @@ function ownerFor(row:EnrichedOrder) {
   if(row.cd==='CD2')return BUSINESS.approvalOwners.distributionCenter;
   if(row.valor>BUSINESS.approvalValueThreshold)return BUSINESS.approvalOwners.highValue;
   return BUSINESS.approvalOwners.systemic;
+}
+
+
+function communicationFacts(row: EnrichedOrder, recommended: string): CommunicationFacts {
+  return {
+    marca: row.marca ?? 'GoGroup',
+    status: row.data_entrega ? 'entregue com acompanhamento' : row.dias_atraso_uteis > 0 ? 'atrasado' : row.status ?? 'em acompanhamento',
+    prazoDiasUteis: businessDaysBetween(BUSINESS.referenceDate, row.data_prometida_real),
+    opcaoRecomendada: recommended,
+  };
+}
+
+async function generateDraft(order: EnrichedOrder, motivo: string, canal: 'aprovacao' | 'zero_touch', recommended: string, store: ActionStore) {
+  const communication = await runCommunicationAgent({ orderId: order.order_id, motivo, fatosDoMotor: communicationFacts(order, recommended), canal });
+  if (communication.numeroNaoVerificado) await recordGuardrailOccurrence(store, 'communication:' + actionId(order.order_id, { motivo, canal }), 'N\u00famero n\u00e3o verificado removido do rascunho; usado template determin\u00edstico.');
+  return communication;
 }
 
 export async function runAgentTool(name:string,args:Record<string,unknown>,data:Dataset=loadDataset(),store:ActionStore=getActionStore()) {
@@ -70,9 +88,10 @@ export async function runAgentTool(name:string,args:Record<string,unknown>,data:
       const result=compareResolutionOptions(row),consultation=await recordConsultation(store,{tool:name,summary:result.reason,orderIds:[row.order_id]});
       return {summary:result.reason,pedido:detail,...result,consulta:consultation};
     }
-    const objective=String(args.objetivo??'atualizar o andamento');
-    const action=await persistRecord({tool:name,type:'comunicacao_cliente',ids:[row.order_id],args:{id:row.order_id,objetivo:objective},summary:`Rascunho de mensagem preparado para ${row.marca??'a marca'}; objective: ${objective}.`,calculation:{evBrl:row.evRisco,valorBrl:row.valor},system:'WhatsApp Business API',simulated:true,store});
-    return {summary:'Contexto e política para rascunho de comunicação.',pedido:{orderId:row.order_id,marca:row.marca,tipo:row.tipo_excecao,objetivo:objective,requerAlcada:row.requerAlcadaHumana},policy:['Tom empático e direto.','Não prometa prazo, reembolso ou resolução sem autorização.','Não inclua valor ou prazo que não esteja no dossiê.'],action};
+    const objective=String(args.objetivo??'acompanhar o pedido'),comparison=compareResolutionOptions(row);
+    const communication=await generateDraft(row,objective,'aprovacao',comparison.recommended,store),owner=ownerFor(row);
+    const action=await persistRecord({tool:name,type:'comunicacao_cliente',ids:[row.order_id],args:{id:row.order_id,objetivo:objective,communicationVersion:2},summary:'Rascunho de comunica\u00e7\u00e3o para '+(row.marca??'a marca')+' aguardando aprova\u00e7\u00e3o de '+owner+'.',calculation:{evBrl:row.evRisco,valorBrl:row.valor,prazoDiasUteis:communication.entradaFatos.prazoDiasUteis,recomendacao:comparison.recommended,decisor:owner,modeloComunicacao:communication.modelUsed},system:'Telegram (chat cliente de demonstra\u00e7\u00e3o)',simulated:true,needsApproval:true,draft:communication.rascunho,store});
+    return {summary:'Rascunho de comunica\u00e7\u00e3o preparado; aprova\u00e7\u00e3o de '+owner+' pendente.',pedido:{orderId:row.order_id,marca:row.marca,tipo:row.tipo_excecao,objetivo:objective,requerAlcada:row.requerAlcadaHumana},comunicacao:{papel:'comunicacao',canal:'aprovacao',modelUsed:communication.modelUsed,entradaFatos:communication.entradaFatos,rascunho:communication.rascunho,validado:communication.validado},action};
   }
   if(name==='investigar_causa') {
     const causeId=String(args.id_causa??''),cause=dashboardResult.systemic.find(item=>item.id===causeId);
@@ -89,15 +108,32 @@ export async function runAgentTool(name:string,args:Record<string,unknown>,data:
     const result=await executeDeterministic(name,{categoria:args.categoria??'todos'},data,'ui',store);
     const action=result.action as Action|undefined;
     let telegramSent=false;
+    let communicationTraces: Array<Record<string,unknown>>=[];
     if(action?.status==='executada') {
-      const delivery=await sendZeroTouchTelegram(action,rows.filter(row=>action.orderIds.includes(row.order_id)),store);
+      const selectedRows=rows.filter(row=>action.orderIds.includes(row.order_id));
+      const brandGroups=new Map<string,EnrichedOrder[]>();
+      for(const row of selectedRows) { const brand=row.marca??'GoGroup'; brandGroups.set(brand,[...(brandGroups.get(brand)??[]),row]); }
+      const drafts:NonNullable<Action['rascunhos']>=[];
+      const messageByBrand:Record<string,string>={};
+      const traces: Array<Record<string,unknown>>=[];
+      for(const [brand,orders] of brandGroups) {
+        const sample=orders[0],communication=await generateDraft(sample,'acompanhar pedidos eleg\u00edveis do lote','zero_touch',sample.zeroTouchAction??'acompanhar pedido',store);
+        messageByBrand[brand]=communication.rascunho;
+        drafts.push({marca:brand,texto:communication.rascunho,orderIds:orders.map(order=>order.order_id)});
+        traces.push({papel:'comunicacao',canal:'zero_touch',modelUsed:communication.modelUsed,entradaFatos:communication.entradaFatos,rascunho:communication.rascunho});
+      }
+      communicationTraces=traces;
+      const withDrafts={...action,rascunhos:drafts,rascunho:drafts.map(draft=>draft.marca+': '+draft.texto).join('\n\n'),calculo:{...action.calculo,rascunhosPorMarca:JSON.stringify(messageByBrand)}};
+      await store.saveAction(withDrafts);
+      result.action=withDrafts;
+      const delivery=await sendZeroTouchTelegram(withDrafts,selectedRows,store,messageByBrand);
       const previousSent=Number(action.calculo.telegramSentCount??0),sentCount=Math.max(previousSent,delivery.sentOrderIds.length),pendingCount=Math.max(0,action.orderIds.length-sentCount);
       telegramSent=sentCount>0;
-      const updated={...action,calculo:{...action.calculo,telegramSentCount:sentCount,telegramPendingCount:pendingCount},...(telegramSent?{canal:'telegram' as const,efeito:{tipo:'real' as const,descricao:`${sentCount} avisos enviados ao chat de demonstração do Telegram; ${pendingCount} pendentes. Estado em tratativa persistido.`,sistema:'Telegram (canal de demonstração)'}}:{})};
-      if(telegramSent&&!action.calculo.telegramSentCount) await store.appendAudit({id:`${action.id}:telegram-notification`,actionId:action.id,evento:'executada',responsavel:'agente',ocorridaEm:new Date().toISOString(),descricao:updated.efeito.descricao});
+      const updated={...withDrafts,calculo:{...withDrafts.calculo,telegramSentCount:sentCount,telegramPendingCount:pendingCount},...(telegramSent?{canal:'telegram' as const,efeito:{tipo:'real' as const,descricao:sentCount+' avisos enviados ao chat de demonstra\u00e7\u00e3o do Telegram; '+pendingCount+' pendentes. Estado em tratativa persistido.',sistema:'Telegram (canal de demonstra\u00e7\u00e3o)'}}:{})};
+      if(telegramSent&&!action.calculo.telegramSentCount) await store.appendAudit({id:action.id+':telegram-notification',actionId:action.id,evento:'executada',responsavel:'agente',ocorridaEm:new Date().toISOString(),descricao:updated.efeito.descricao});
       if(delivery.configured||telegramSent) { await store.saveAction(updated); result.action=updated; }
     }
-    return {summary:result.action?`Lote autônomo processado: ${result.affectedOrderIds?.length??0} pedidos movidos para em tratativa; ${telegramSent?'aviso(s) enviado(s) ao Telegram de demonstração.':'avisos externos não enviados.'}`:String(result.actionExecuted),resultado:result,gatedForHuman:gated,telegramSent};
+    return {summary:result.action?`Lote autônomo processado: ${result.affectedOrderIds?.length??0} pedidos movidos para em tratativa; ${telegramSent?'aviso(s) enviado(s) ao Telegram de demonstração.':'avisos externos não enviados.'}`:String(result.actionExecuted),resultado:result,gatedForHuman:gated,telegramSent,comunicacoes:communicationTraces};
   }
   if(name==='abrir_chamado_transportadora') {
     const carrier=String(args.transportadora??''),requested=Array.isArray(args.pedidos)?args.pedidos.map(String):[];

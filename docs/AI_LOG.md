@@ -64,6 +64,16 @@
 - **Decisão sobre a licença:** conforme instrução do usuário, o titular foi alterado de GoGroup para Tiago Saturnino, mudando somente essa linha. Os commits de fixtures e licença foram enviados para `origin/main` sem force; o registro desta auditoria foi commitado separadamente.
 - **Lição:** a checagem precisa cobrir a história do Git e as combinações de dados, enquanto as exceções de teste devem ser estreitas, documentadas e exercitadas por teste.
 
+## 2026-11-21 — Tarefa H2: sub-agente de Comunicação
+
+- **Pedido:** tornar Comunicação uma chamada de modelo independente, persistir o rascunho como Action aprovável, enviar somente depois da aprovação e usar o mesmo sub-agente no Zero-Touch.
+- **Problema → causa:** o papel Comunicação só constava no prompt geral do Orquestrador; a tool retornava política sem texto e não havia rascunho auditável para aprovar.
+- **Correção:** criei `lib/agent/communication.ts` com prompt próprio, fatos limitados do motor, validador numérico e template determinístico. A tool persiste rascunho, modelo, fatos e papel responsável em `aguardando_aprovacao`; Zero-Touch grava mensagens por marca e adiciona etapas `comunicacao` à trilha. Aprovação envia ao chat Telegram de demonstração quando configurado; rejeição não envia e o estado do pedido não é alterado.
+- **Erro corrigido no caminho:** uma edição intermediária via PowerShell recodificou `lib/agent/tools.ts`; restaurei esse arquivo do commit anterior e reapliquei apenas as mudanças necessárias por edição Node em UTF-8.
+- **Decisão:** o texto gerado não pode prometer prazo ou valor; sem Groq ou com número não verificado, o rascunho usa template. O envio real é limitado ao chat de demonstração e permanece identificável como tal.
+- **Lição:** um papel de agente só fica demonstrável quando existe chamada própria, saída visível, persistência e uma fronteira de aprovação observável.
+- **Validação:** `npm test` passou com 40 testes; lint e build passaram após corrigir dois tipos nos testes. `npm run metrics` manteve os nove agregados de referência sem diff: 2.000 pedidos, EV_Risco R$ 97.456,36, Dia 1 FIFO R$ 8.290,25, prioridade R$ 22.998,23, incremento R$ 14.707,98, Zero-Touch 327/65,4 h e 14 dias.
+
 ## 2026-11-21 — Tarefa H1: separar consultas de ações
 
 - **Pedido:** retirar consultas e simulações do ciclo de Actions, separar os KPIs, preservar o histórico legado sem classificá-lo como efeito e contar pedidos distintos processados por Zero-Touch.

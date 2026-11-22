@@ -16,6 +16,8 @@ export type Action = {
   criadaEm: string;
   atualizadaEm: string;
   efeito: { tipo: 'real' | 'simulado'; descricao: string; sistema: string };
+  rascunho?: string;
+  rascunhos?: Array<{ marca: string; texto: string; orderIds: string[] }>;
   trilhaAgente?: Array<{ round: number; papel: string; pensamentoResumido: string; tool: string; argumentos: Record<string, unknown>; resultado: unknown }>;
   telegramApprovalMessageId?: number;
 };

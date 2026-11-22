@@ -24,6 +24,12 @@ const safeSummary = (name: string, role: AgentRole, result: unknown) => {
   return `${role}: ${purpose[name] ?? `consultei ${name}`} para avançar a rotina.`;
 };
 const stringifyToolResult = (result: unknown) => JSON.stringify(result).slice(0, 9000);
+function communicationTraces(result: unknown) {
+  if (!result || typeof result !== 'object') return [];
+  const record = result as Record<string, unknown>;
+  const traces = Array.isArray(record.comunicacoes) ? record.comunicacoes : record.comunicacao ? [record.comunicacao] : [];
+  return traces.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'));
+}
 function validateArgumentText(value: unknown, results: unknown[], onInvalid: () => Promise<void>): Promise<unknown> {
   if (typeof value === 'string') {
     const checked = validateAgentText(value, results);
@@ -78,6 +84,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         results.push(result);
         const step: AgentStep = { round, papel: role ?? 'orquestrador', pensamentoResumido: safeSummary(call.function.name, role ?? 'orquestrador', result), tool: call.function.name, argumentos: args, resultado: result };
         steps.push(step);
+        for (const communication of communicationTraces(result)) {
+          steps.push({ round, papel: 'comunicacao', pensamentoResumido: 'comunicacao: redigi um rascunho a partir dos fatos do motor e registrei o modelo usado.', tool: 'subagente_comunicacao', argumentos: { canal: communication.canal, fatosDoMotor: communication.entradaFatos }, resultado: communication });
+        }
         messages.push({ role: 'tool', tool_call_id: call.id, content: stringifyToolResult(result) });
       }
     }

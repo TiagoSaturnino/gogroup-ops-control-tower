@@ -8,6 +8,14 @@ import { TOOL_ROLE, type AgentRole } from './roles';
 
 function traceTool(steps:AgentStep[],round:number,name:string,args:Record<string,unknown>,result:unknown,role:AgentRole=TOOL_ROLE[name]??'orquestrador') {
   steps.push({round,papel:role,pensamentoResumido:`${role}: consultei ${name} com evidência do motor para avançar a rotina.`,tool:name,argumentos:args,resultado:result});
+  if (result && typeof result === 'object') {
+    const record = result as Record<string, unknown>;
+    const traces = Array.isArray(record.comunicacoes) ? record.comunicacoes : record.comunicacao ? [record.comunicacao] : [];
+    for (const trace of traces) if (trace && typeof trace === 'object') {
+      const communication = trace as Record<string, unknown>;
+      steps.push({ round, papel: 'comunicacao', pensamentoResumido: 'comunicacao: rascunho criado pelo template determinístico a partir dos fatos do motor.', tool: 'subagente_comunicacao', argumentos: { canal: communication.canal, fatosDoMotor: communication.entradaFatos }, resultado: communication });
+    }
+  }
   return result as Record<string,unknown>;
 }
 

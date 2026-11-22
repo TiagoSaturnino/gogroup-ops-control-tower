@@ -22,7 +22,8 @@ export async function formatActionApproval(action: Action) {
   const recommendation = String(val(action, 'recomendacao') ?? Object.entries(costs).sort((a, b) => a[1] - b[1])[0]?.[0] ?? 'aguardando decisão humana');
   const owner = String(val(action, 'decisor') ?? 'Responsável operacional');
   const orderList = action.orderIds.slice(0, 25).map(escapeMarkdownV2).join(', ') || 'sem pedido associado';
-  return `*Aprovação pendente*\n*Pedido(s):* ${orderList}\n*Exceção:* ${escapeMarkdownV2(exceptions.join(', ') || action.tipo)}\n*Opções comparadas:*\n${options}\n*Recomendação:* ${escapeMarkdownV2(recommendation)}\n*Responsável:* ${escapeMarkdownV2(owner)}\n*Justificativa:* ${escapeMarkdownV2(action.justificativa)}`;
+  const draft = action.rascunho ? `\n*Rascunho para aprova\u00e7\u00e3o:*\n${escapeMarkdownV2(action.rascunho)}` : '';
+  return `*Aprovação pendente*\n*Pedido(s):* ${orderList}\n*Exceção:* ${escapeMarkdownV2(exceptions.join(', ') || action.tipo)}\n*Opções comparadas:*\n${options}\n*Recomendação:* ${escapeMarkdownV2(recommendation)}\n*Responsável:* ${escapeMarkdownV2(owner)}\n*Justificativa:* ${escapeMarkdownV2(action.justificativa)}${draft}`;
 }
 
 export async function notifyPendingTelegramActions(actions: Action[]) {

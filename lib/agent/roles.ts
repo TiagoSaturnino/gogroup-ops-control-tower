@@ -14,7 +14,7 @@ export const ROLES: Record<AgentRole, { prompt: string; alçada: string; tools: 
     tools: ['listar_fila','detalhar_pedido','comparar_opcoes_resolucao','investigar_causa','abrir_chamado_transportadora','escalar_para_humano'],
   },
   comunicacao: {
-    prompt: 'Comunicação: escreva com empatia, tom compatível com a marca e política. Não prometa data, reembolso ou solução sem autorização. Mensagens externas são rascunhos simulados.', alçada: 'Redige rascunhos; não envia mensagens nem promete compensação ou prazo.',
+    prompt: 'Comunicação: escreva com empatia, tom compatível com a marca e política. Não prometa data, reembolso ou solução sem autorização. Rascunhos aguardam aprovação humana; com Telegram configurado, o envio só ocorre no chat de demonstração após aprovação.', alçada: 'Redige rascunhos e aguarda aprovação humana antes de qualquer envio externo.',
     tools: ['detalhar_pedido','redigir_mensagem_cliente'],
   },
 };
@@ -33,6 +33,6 @@ export const TOOL_DEFINITIONS = [
   { type: 'function', function: { name: 'investigar_causa', description: 'Monta dossiê numérico para causa-raiz.', parameters: { type: 'object', properties: { id_causa: { type: 'string' } }, required: ['id_causa'] } } },
   { type: 'function', function: { name: 'executar_lote_zero_touch', description: 'Executa avisos simulados apenas em pedidos autônomos sem alçada humana.', parameters: { type: 'object', properties: { categoria: { type: 'string' } }, required: ['categoria'] } } },
   { type: 'function', function: { name: 'abrir_chamado_transportadora', description: 'Registra chamado simulado para transportadora e aguarda aprovação humana.', parameters: { type: 'object', properties: { transportadora: { type: 'string' }, pedidos: { type: 'array', items: { type: 'string' } } }, required: ['transportadora','pedidos'] } } },
-  { type: 'function', function: { name: 'redigir_mensagem_cliente', description: 'Prepara contexto e política para redigir mensagem por marca.', parameters: { type: 'object', properties: { id: { type: 'string' }, objetivo: { type: 'string' } }, required: ['id','objetivo'] } } },
+  { type: 'function', function: { name: 'redigir_mensagem_cliente', description: 'Chama o sub-agente de Comunicação para redigir e persistir um rascunho pendente de aprovação.', parameters: { type: 'object', properties: { id: { type: 'string' }, objetivo: { type: 'string' } }, required: ['id','objetivo'] } } },
   { type: 'function', function: { name: 'escalar_para_humano', description: 'Cria ação pendente de aprovação com responsável e opções calculadas.', parameters: { type: 'object', properties: { id: { type: 'string' }, motivo: { type: 'string' }, quem_deve_decidir: { type: 'string' }, opcoes: { type: 'array', items: { type: 'string' } }, confianca: { type: 'string', enum: ['baixa','media','alta'] } }, required: ['id','motivo','quem_deve_decidir','opcoes'] } } },
 ] as const;

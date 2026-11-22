@@ -20,7 +20,7 @@
 - Burn-down: pedidos ordenados por FIFO (data de abertura, depois data do pedido) ou EV decrescente; processamento diário em lotes da capacidade parametrizada. EV acumulado é a soma dos EV dos pedidos processados até aquele dia.
 - Zero-Touch: 12 minutos humanos poupados por caso; capacidade de 150/dia e 12 minutos/caso: dados oficiais do enunciado.
 - Comparação de resolução: reenvio = custo CMV + frete + contato + perda esperada de LTV; reembolso = valor pago + contato + perda esperada de LTV; aguardar = EV_Risco do motor. O motor escolhe o menor custo calculado; LTV e custos diretos vêm exclusivamente dos dados e fórmulas acima.
-- Orquestração: o Groq escolhe tools e redige texto; Triagem, Investigador e Comunicação têm permissões e alçadas delimitadas. Até seis rodadas de modelo; no erro ou indisponibilidade, o plano equivalente usa as mesmas tools determinísticas. A saída textual monetária ou temporal é validada contra os resultados de tools da execução.
+- Orquestração: o Groq escolhe tools em um loop limitado; Triagem e Investigador atuam pelas ferramentas do motor. Comunicação faz uma chamada de modelo separada, com prompt próprio e somente marca, status, prazo real em dias úteis e opção recomendada calculados pelo motor. O texto passa pelo validador numérico; se falhar ou não houver chave, usa template determinístico. O rascunho e o modelo usado ficam na Action/trilha e aguardam aprovação.
 - Chamado para transportadora e escalada: são Actions persistidas aguardando aprovação humana; não são chamadas externas executadas. O Zero-Touch só inclui pedidos sem alçada e persiste `em_tratativa`.
 
 ## Constantes e origens
@@ -34,6 +34,9 @@ As constantes centralizadas estão em `lib/params.ts`. Dados oficiais: CMV 24%, 
 Os custos de frete de benchmark vêm das rotas recebidas com o dataset; se não houver tarifa da Rota Express na região Nordeste, o benchmark não é exibido. Nenhum benchmark ou economia é apresentado como resultado persistido.
 
 ## Ações e persistência
+
+- Comunicação ao cliente: `redigir_mensagem_cliente` cria Action `comunicacao_cliente` com rascunho integral, fatos do motor, modelo usado e papel responsável definido por `ownerFor`; status inicial `aguardando_aprovacao`. Rejeitar não envia mensagem. Ao aprovar, se token do bot e chat de demonstração estiverem configurados, envia o rascunho a esse chat e registra efeito real nesse canal; sem configuração, o efeito externo permanece simulado. Essa Action não altera o estado do pedido.
+- Zero-Touch: o sub-agente prepara mensagens por marca em modo autônomo para casos sem alçada; os textos ficam associados à Action. O envio ao chat de demonstração só é marcado real após confirmação da Bot API.
 
 - Uma ação percorre `proposta → aguardando_aprovacao → aprovada → executada`, ou termina em `rejeitada`. Decisões de alçada humana são registradas no store e na trilha de auditoria.
 - O Zero-Touch coloca pedidos em `em_tratativa`. Esse é um efeito persistido no GoGroup Ops; sem Telegram configurado, a notificação ao cliente é simulada. Com Telegram configurado, o envio confirmado ao chat de demonstração é real nesse canal, mas não é mensagem a cliente real nem comprova resolução. Os pedidos saem da fila ativa, dos totais ativos e do burn-down.

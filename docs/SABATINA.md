@@ -2,7 +2,7 @@
 
 Cada resposta tem duas frases curtas; a indicação final sugere o que abrir na demonstração.
 
-1. **Como o agente funciona tecnicamente?** Um orquestrador escolhe ferramentas em um loop limitado e delega triagem, investigação e comunicação a papéis especializados. As ferramentas consultam o motor determinístico e registram Actions no store. **Mostrar:** linha do tempo do painel Agente.
+1. **Como o agente funciona tecnicamente?** O Orquestrador coordena um loop de ferramentas, enquanto Triagem e Investigador consultam o motor; Comunicação faz uma chamada de modelo separada, recebe fatos restritos do motor e persiste um rascunho aguardando aprovação. Sem Groq, o template determinístico continua disponível; aprovar pode enviar ao chat Telegram de demonstração, mas nunca marca o pedido como resolvido. **Mostrar:** chamada `subagente_comunicacao`, rascunho e cartão pendente na trilha.
 2. **Por que o LLM não calcula os valores?** Um modelo de linguagem pode errar aritmética ou inventar dados. TypeScript é a fonte única de custos, prazos, EV e alçadas, e o validador confere números do texto. **Mostrar:** `lib/engine.ts`, `lib/params.ts` e uma saída de tool.
 3. **O que acontece sem IA ou chave Groq?** O fallback determinístico usa as mesmas ferramentas e registra que o modelo usado foi `deterministic`. A demonstração continua funcionando sem credenciais externas. **Mostrar:** executar “Monte o plano de hoje” sem Groq.
 4. **Como mediriam sucesso?** A prova de conceito mede pedidos movidos autonomamente e estima horas com 12 minutos por caso; isso não é taxa de resolução observada. No piloto, compararíamos os estados registrados com os desfechos confirmados na operação. **Mostrar:** `docs/METRICAS.md` e Actions persistidas.
