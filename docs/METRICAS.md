@@ -18,7 +18,7 @@ O motor também classifica **368** pedidos como elegíveis antes de aplicar alç
 
 ### Percentual processado sem intervenção
 
-O indicador correto da prova de conceito é **percentual processado autonomamente**, não “percentual resolvido”: `pedidos em Actions Zero-Touch executadas pelo agente ÷ pedidos ativos`. Como referência pré-execução, o proxy de elegibilidade é **16,35%**. Após uma execução, a quantidade efetivamente movida para `em_tratativa` deve ser lida nas Actions persistidas. O sistema não mede quantos casos tiveram o problema externo solucionado.
+O indicador correto da prova de conceito é **percentual processado autonomamente**, não “percentual resolvido”: `pedidos distintos em Actions Zero-Touch executadas, cujo estado persistido é em_tratativa ÷ pedidos ativos`. O painel deduplica os IDs dos pedidos, portanto reprocessar um lote não infla o KPI. Como referência pré-execução, o proxy de elegibilidade é **16,35%**. O sistema não mede quantos casos tiveram o problema externo solucionado.
 
 ## Métrica de impacto operacional/financeiro
 

@@ -4,7 +4,7 @@ import { transitionAction } from '../actions';
 import type { EnrichedOrder } from '../engine';
 import { BUSINESS } from '../params';
 import { dashboard, executeDeterministic, loadDataset, type Dataset } from '../tools';
-import { executeActionEffect, getActionStore, type ActionStore } from '../store';
+import { executeActionEffect, getActionStore, recordConsultation, type ActionStore } from '../store';
 import { sendZeroTouchTelegram } from '../telegram-api';
 import { compareResolutionOptions } from '../resolution';
 
@@ -55,20 +55,20 @@ export async function runAgentTool(name:string,args:Record<string,unknown>,data:
     const filter=String(args.filtro??'todos');
     const filtered=rows.filter(row=>filter==='vip'?row.isVip:filter==='zero_touch'?row.isZeroTouch:filter==='alçada'||filter==='alcada'?row.requerAlcadaHumana:filter==='categoria'?row.tipo_excecao===args.categoria:true);
     const selected=filtered.slice(0,limit).map(row=>({orderId:row.order_id,marca:row.marca,tipo:row.tipo_excecao,valorBrl:row.valor,evBrl:row.evRisco,isVip:row.isVip,requerAlcada:row.requerAlcadaHumana,zeroTouch:row.isZeroTouch,transportadora:row.transportadora,uf:row.uf,sku:row.sku}));
-    const action=await persistRecord({tool:name,type:'consulta_fila',ids:selected.map(row=>row.orderId),args:{limit,filter,categoria:args.categoria as string},summary:`Consulta persistida da fila priorizada: ${selected.length} pedidos retornados.`,calculation:{pedidos:selected.length,evBrl:selected.reduce((sum,row)=>sum+row.evBrl,0)},system:'GoGroup Ops',simulated:false,store});
-    return {summary:`Fila priorizada pelo motor; ${selected.length} pedidos na amostra.`,pedidos:selected,counts:{ativos:rows.length,vip:rows.filter(row=>row.isVip).length,alçada:rows.filter(row=>row.requerAlcadaHumana).length,zeroTouch:rows.filter(row=>row.isZeroTouch).length},action};
+    const summary=`Fila priorizada pelo motor; ${selected.length} pedidos na amostra.`;const consultation=await recordConsultation(store,{tool:name,summary,orderIds:selected.map(row=>row.orderId)});
+    return {summary:`Fila priorizada pelo motor; ${selected.length} pedidos na amostra.`,pedidos:selected,counts:{ativos:rows.length,vip:rows.filter(row=>row.isVip).length,alçada:rows.filter(row=>row.requerAlcadaHumana).length,zeroTouch:rows.filter(row=>row.isZeroTouch).length},consulta:consultation};
   }
   if(name==='detalhar_pedido'||name==='comparar_opcoes_resolucao'||name==='redigir_mensagem_cliente') {
     const orderId=String(args.id??''),row=rows.find(order=>order.order_id===orderId);
     if(!row)return {error:`Pedido ${orderId} não foi encontrado na fila ativa.`};
     const detail={orderId:row.order_id,marca:row.marca,tipo:row.tipo_excecao,status:row.status,valorBrl:row.valor,evBrl:row.evRisco,margemBrl:row.margem,cmvBrl:row.cmv,custoReenvioBrl:row.custo_reenvio,custoReembolsoBrl:row.custo_reembolso,perdaLtvBrl:row.perda_ltv_12m,probCancel:row.probCancel,diasAtrasoUteis:row.dias_atraso_uteis,transportadora:row.transportadora,uf:row.uf,sku:row.sku,lote:row.lote_produto,maquina:row.maquina,turno:row.turno,cd:row.cd,isVip:row.isVip,requerAlcada:row.requerAlcadaHumana};
     if(name==='detalhar_pedido') {
-      const action=await persistRecord({tool:name,type:'investigacao',ids:[row.order_id],args:{id:row.order_id},summary:`Dossiê determinístico consultado para ${row.order_id}.`,calculation:{evBrl:row.evRisco,valorBrl:row.valor,perdaLtvBrl:row.perda_ltv_12m},system:'GoGroup Ops',simulated:false,store});
-      return {summary:`Dossiê consultado pelo motor para ${row.order_id}.`,pedido:detail,action};
+      const summary=`Dossie consultado pelo motor para ${row.order_id}.`;const consultation=await recordConsultation(store,{tool:name,summary,orderIds:[row.order_id]});
+      return {summary:`Dossiê consultado pelo motor para ${row.order_id}.`,pedido:detail,consulta:consultation};
     }
     if(name==='comparar_opcoes_resolucao') {
-      const result=compareResolutionOptions(row),action=await persistRecord({tool:name,type:'comparacao',ids:[row.order_id],args:{id:row.order_id},summary:result.reason,calculation:{evBrl:row.evRisco,valorPagoBrl:row.valor,reenvioBrl:result.options[0].costBrl,reembolsoBrl:result.options[1].costBrl,aguardarBrl:result.options[2].costBrl,perdaLtvBrl:row.perda_ltv_12m,recomendacao:result.recommended},system:'GoGroup Ops',simulated:false,store});
-      return {summary:result.reason,pedido:detail,...result,action};
+      const result=compareResolutionOptions(row),consultation=await recordConsultation(store,{tool:name,summary:result.reason,orderIds:[row.order_id]});
+      return {summary:result.reason,pedido:detail,...result,consulta:consultation};
     }
     const objective=String(args.objetivo??'atualizar o andamento');
     const action=await persistRecord({tool:name,type:'comunicacao_cliente',ids:[row.order_id],args:{id:row.order_id,objetivo:objective},summary:`Rascunho de mensagem preparado para ${row.marca??'a marca'}; objective: ${objective}.`,calculation:{evBrl:row.evRisco,valorBrl:row.valor},system:'WhatsApp Business API',simulated:true,store});
@@ -81,8 +81,8 @@ export async function runAgentTool(name:string,args:Record<string,unknown>,data:
     const countBy=(key:'transportadora'|'uf'|'lote_produto'|'maquina'|'turno'|'cd')=>Object.entries(affected.reduce<Record<string,number>>((groups,row)=>{const value=row[key]??'não informado';groups[String(value)]=(groups[String(value)]??0)+1;return groups;},{})).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([valor,casos])=>({valor,casos}));
     const recurringCost=affected.reduce((sum,row)=>sum+row.custo_contato,0);
     const evidence={id:cause.id,titulo:cause.title,pedidos:cause.count,gmvBrl:cause.gmvExposto,evBrl:affected.reduce((sum,row)=>sum+row.evRisco,0),economiaEstimadaBrl:cause.economiaEstimada,custoContatoRecorrenteBrl:recurringCost,transportadoras:countBy('transportadora'),rotasUf:countBy('uf'),lotes:countBy('lote_produto'),maquinas:countBy('maquina'),turnos:countBy('turno'),centrosDistribuicao:countBy('cd'),pedidoIds:affected.slice(0,8).map(row=>row.order_id),recomendacao:recommendation[causeId]??'Investigar padrão com os responsáveis da operação.'};
-    const action=await persistRecord({tool:name,type:'investigacao',ids:affected.slice(0,8).map(row=>row.order_id),args:{id_causa:causeId},summary:`Dossiê de causa-raiz ${cause.title} persistido.`,calculation:{pedidos:cause.count,gmvBrl:cause.gmvExposto,evBrl:evidence.evBrl,economiaEstimadaBrl:cause.economiaEstimada,custoContatoRecorrenteBrl:recurringCost},system:'GoGroup Ops',simulated:false,store});
-    return {summary:`Dossiê de ${cause.title} com evidências do motor e recomendação de processo.`,evidencias:evidence,action};
+    const summary=`Dossie de ${cause.title} com evidencias do motor e recomendacao de processo.`;const consultation=await recordConsultation(store,{tool:name,summary,orderIds:affected.slice(0,8).map(row=>row.order_id)});
+    return {summary:`Dossiê de ${cause.title} com evidências do motor e recomendação de processo.`,evidencias:evidence,consulta:consultation};
   }
   if(name==='executar_lote_zero_touch') {
     const gated=rows.filter(row=>row.isZeroTouch&&row.requerAlcadaHumana).map(row=>({orderId:row.order_id,quemDecide:ownerFor(row),motivo:row.isVip?'cliente VIP':row.tipo_excecao==='ruptura_pos_venda'?'ruptura pós-venda':'valor acima da alçada'}));

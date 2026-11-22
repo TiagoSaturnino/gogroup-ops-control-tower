@@ -4,9 +4,14 @@ import type { Order } from '../lib/engine';
 import { runAgentLoop } from '../lib/agent/loop';
 import { deterministicFallback } from '../lib/agent/fallback';
 import { validateAgentText } from '../lib/agent/guardrails';
-import { MemoryActionStore } from '../lib/store';
+import { executeActionEffect, MemoryActionStore } from '../lib/store';
+import { isConsultationActionType, transitionAction, type Action } from '../lib/actions';
 import { runAgentTool } from '../lib/agent/tools';
 import { dashboard } from '../lib/tools';
+import { executeDeterministic } from '../lib/tools';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Auditoria } from '../components/Auditoria';
 
 const fixture = JSON.parse(readFileSync('data/fixtures/synthetic.json', 'utf8')) as { orders: Order[]; routes: unknown[] };
 
@@ -77,4 +82,71 @@ describe('laço e ferramentas do agente', () => {
     expect(tools).toContain('abrir_chamado_transportadora');
     expect((await store.listActions()).filter(action => action.tipo === 'escalonamento')).toHaveLength(2);
   });
+
+  it('keeps plan consultations out of effect Actions and reports separate KPIs', async () => {
+    const store = new MemoryActionStore();
+    const plan = await deterministicFallback('Monte o plano de hoje', fixture, store);
+    const data = await dashboard(fixture, {}, store);
+    const actions = await store.listActions();
+    const querySteps = plan.steps.filter(step => ['listar_fila', 'comparar_opcoes_resolucao', 'investigar_causa'].includes(step.tool));
+    const zeroTouchIds = new Set(actions.filter(action => action.tipo === 'zero_touch_aviso' && action.status === 'executada')
+      .flatMap(action => action.orderIds.filter(orderId => data.orderStates[orderId] === 'em_tratativa')));
+
+    expect(data.agentMetrics.consultasAgente).toBe(querySteps.length);
+    expect(data.agentMetrics.acoesComEfeito).toBe(actions.length);
+    expect(actions.every(action => !isConsultationActionType(action.tipo))).toBe(true);
+    expect(data.agentMetrics.processadasAutonomamente).toBe(zeroTouchIds.size);
+    expect(data.agentMetrics.processadasAutonomamente).toBeGreaterThan(0);
+  });
+
+  it('does not change order state for consultations or simulations; approved effects and Zero-Touch do', async () => {
+    const store = new MemoryActionStore();
+    const before = await store.getOrderStates();
+    const firstOrder = (await dashboard(fixture, {}, store)).orders[0];
+    await runAgentTool('listar_fila', { limite: 3 }, fixture, store);
+    await runAgentTool('detalhar_pedido', { id: firstOrder.order_id }, fixture, store);
+    await runAgentTool('comparar_opcoes_resolucao', { id: firstOrder.order_id }, fixture, store);
+    await runAgentTool('investigar_causa', { id_causa: 'rota_express_ne' }, fixture, store);
+    await executeDeterministic('simular_premissas_e_capacidade', {}, fixture, 'ui', store);
+    expect(await store.getOrderStates()).toEqual(before);
+    expect(await store.listActions()).toEqual([]);
+    expect((await store.listAudit()).every(record => record.kind === 'consulta')).toBe(true);
+
+    await runAgentTool('executar_lote_zero_touch', { categoria: 'todos' }, fixture, store);
+    expect(Object.values(await store.getOrderStates()).some(state => state === 'em_tratativa')).toBe(true);
+
+    const nextOrder = (await dashboard(fixture, {}, store)).orders[0];
+    const pending: Action = { id: 'approved-effect', orderIds: [nextOrder.order_id], tipo: 'reenvio', status: 'proposta', responsavel: 'agente', canal: 'ui', impactoBrl: 0, horasLiberadas: 0, justificativa: 'Approval test', calculo: {}, criadaEm: new Date().toISOString(), atualizadaEm: new Date().toISOString(), efeito: { tipo: 'simulado', descricao: 'Approved test action', sistema: 'ERP' } };
+    await store.createAction(pending);
+    const approved = transitionAction(transitionAction(pending, 'aguardando_aprovacao', 'agente'), 'aprovada', 'humano');
+    await executeActionEffect(approved, store);
+    expect((await store.getOrderStates())[nextOrder.order_id]).toBe('em_tratativa');
+  });
+
+  it('deduplicates autonomous KPI by order ID and classifies legacy read Actions without deleting them', async () => {
+    const store = new MemoryActionStore();
+    const legacy = (id: string, tipo: Action['tipo'], orderId: string): Action => ({ id, orderIds: [orderId], tipo, status: 'executada', responsavel: 'agente', canal: 'ui', impactoBrl: 0, horasLiberadas: 0, justificativa: 'Legacy record', calculo: {}, criadaEm: new Date().toISOString(), atualizadaEm: new Date().toISOString(), efeito: { tipo: 'simulado', descricao: 'Legacy format', sistema: 'GoGroup Ops' } });
+    const legacyQueue = legacy('legacy-queue', 'consulta_fila', 'GC-0001');
+    const legacyInvestigation = legacy('legacy-investigation', 'investigacao', 'GC-0002');
+    await store.createAction(legacyQueue);
+    await store.createAction(legacyInvestigation);
+    await store.createAction(legacy('zt-one', 'zero_touch_aviso', 'GC-0003'));
+    await store.createAction({ ...legacy('zt-two', 'zero_touch_aviso', 'GC-0003'), orderIds: ['GC-0003', 'GC-0003'] });
+    await store.setOrderState('GC-0003', 'em_tratativa');
+    await expect(executeActionEffect({ ...legacyQueue, status: 'aprovada' }, store)).rejects.toThrow();
+
+    const data = await dashboard(fixture, {}, store);
+    const history = await store.listActions();
+    const html = renderToStaticMarkup(createElement(Auditoria, { actions: history, audit: [], orderStates: await store.getOrderStates(), onDecision: () => undefined }));
+
+    expect(data.agentMetrics.consultasAgente).toBe(2);
+    expect(data.agentMetrics.acoesComEfeito).toBe(2);
+    expect(data.agentMetrics.processadasAutonomamente).toBe(1);
+    expect(history).toHaveLength(4);
+    expect(html.match(/Consulta legada/g)).toHaveLength(2);
+    const legacyCards = html.split('<article').filter(card => card.includes('Consulta legada'));
+    expect(legacyCards.every(card => !card.includes('efeito:'))).toBe(true);
+    expect(isConsultationActionType('comunicacao_cliente')).toBe(false);
+  });
+
 });

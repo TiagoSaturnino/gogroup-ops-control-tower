@@ -1,6 +1,43 @@
 "use client";
+
+import { isConsultationActionType } from '../lib/actions';
 import type { ActionHistory, AuditRecord } from './control-types';
-const money=(value:number)=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(value||0);
-export function Auditoria({actions,audit,orderStates,onDecision}:{actions:ActionHistory[];audit:AuditRecord[];orderStates:Record<string,string>;onDecision:(id:string,decision:'aprovar'|'rejeitar')=>void}) {
-  return <section className="mb-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="audit-heading"><div className="mb-4 flex items-center justify-between"><div><h2 id="audit-heading" className="font-bold">Trilha de auditoria persistida</h2><p className="text-xs text-slate-500">Ações e decisões carregadas do store da aplicação</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold">{actions.length}</span></div>{actions.length?<div className="max-h-[420px] space-y-2 overflow-y-auto">{actions.map(action=><article key={action.id} className="rounded-lg border border-slate-100 p-3"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-semibold">{action.justificativa}</p><p className="mt-1 break-all text-[10px] text-slate-400">{action.criadaEm} • {action.tipo} • {action.canal}</p></div><span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold">{action.status}</span></div><div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px]"><span className="text-slate-500">{action.orderIds.length} pedidos • {action.responsavel}</span><strong>{money(action.impactoBrl)} estimados</strong><span className={`rounded-full px-2 py-1 font-semibold ${action.efeito.tipo==='real'?'bg-emerald-50 text-emerald-800':'bg-amber-50 text-amber-800'}`}>efeito: {action.efeito.tipo}</span></div>{action.orderIds.length>0&&<p className="mt-1 break-words text-[10px] text-slate-500">Estado persistido: {orderStates[action.orderIds[0]]??'aberto'}{action.orderIds.length>1?` • ${action.orderIds.length} pedidos no lote`:''}</p>}{action.efeito.tipo==='simulado'&&<p className="mt-1 text-[10px] text-slate-500">Em produção, isto chamaria {action.efeito.sistema}.</p>}{(action.status==='aguardando_aprovacao'||action.status==='aprovada')&&<div className="mt-3 flex gap-2"><button aria-label={`Aprovar ação ${action.id}`} onClick={()=>onDecision(action.id,'aprovar')} className="rounded-md bg-emerald-700 px-3 py-1.5 text-[10px] font-semibold text-white">{action.status==="aprovada"?"Retomar execução":"Aprovar"}</button><button aria-label={`Rejeitar ação ${action.id}`} onClick={()=>onDecision(action.id,'rejeitar')} className="rounded-md border border-rose-300 px-3 py-1.5 text-[10px] font-semibold text-rose-800">Rejeitar</button></div>}</article>)}</div>:<p className="rounded-lg border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400">Nenhuma a&#231;&#227;o ainda.</p>}{audit.length>0&&<details className="mt-4"><summary className="cursor-pointer text-xs font-semibold text-slate-600">Eventos de auditoria ({audit.length})</summary><ul className="mt-2 space-y-1">{[...audit].reverse().map(event=><li key={event.id} className="text-[10px] text-slate-500">{event.ocorridaEm} • {event.evento} • {event.descricao}</li>)}</ul></details>}</section>;
+
+const money = (value: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
+
+export function Auditoria({ actions, audit, orderStates, onDecision }: {
+  actions: ActionHistory[];
+  audit: AuditRecord[];
+  orderStates: Record<string, string>;
+  onDecision: (id: string, decision: 'aprovar' | 'rejeitar') => void;
+}) {
+  const effectActions = actions.filter(action => !isConsultationActionType(action.tipo));
+  const legacyConsultationIds = new Set(actions.filter(action => isConsultationActionType(action.tipo)).map(action => action.id));
+
+  return <section className="mb-8 rounded-xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="audit-heading">
+    <div className="mb-4 flex items-center justify-between">
+      <div><h2 id="audit-heading" className="font-bold">Trilha de auditoria persistida</h2><p className="text-xs text-slate-500">Consultas e ações carregadas do store</p></div>
+      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold">{effectActions.length} ações</span>
+    </div>
+    {actions.length ? <div className="max-h-[420px] space-y-2 overflow-y-auto">{actions.map(action => {
+      const consultation = isConsultationActionType(action.tipo);
+      return <article key={action.id} className="rounded-lg border border-slate-100 p-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div><p className="text-xs font-semibold">{action.justificativa}</p><p className="mt-1 break-all text-[10px] text-slate-400">{action.criadaEm} • {action.tipo} • {action.canal}</p></div>
+          <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold">{consultation ? 'Consulta legada' : action.status}</span>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+          <span className="text-slate-500">{action.orderIds.length} pedidos • {action.responsavel}</span>
+          {consultation ? <span className="rounded-full bg-slate-100 px-2 py-1 font-semibold text-slate-700">Consulta (histórico antigo)</span> : <><strong>{money(action.impactoBrl)} estimados</strong><span className={`rounded-full px-2 py-1 font-semibold ${action.efeito.tipo === 'real' ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>efeito: {action.efeito.tipo}</span></>}
+        </div>
+        {!consultation && action.orderIds.length > 0 && <p className="mt-1 break-words text-[10px] text-slate-500">Estado persistido: {orderStates[action.orderIds[0]] ?? 'aberto'}{action.orderIds.length > 1 ? ` • ${action.orderIds.length} pedidos no lote` : ''}</p>}
+        {!consultation && action.efeito.tipo === 'simulado' && <p className="mt-1 text-[10px] text-slate-500">Em produção, isto chamaria {action.efeito.sistema}.</p>}
+        {!consultation && (action.status === 'aguardando_aprovacao' || action.status === 'aprovada') && <div className="mt-3 flex gap-2"><button aria-label={`Aprovar ação ${action.id}`} onClick={() => onDecision(action.id, 'aprovar')} className="rounded-md bg-emerald-700 px-3 py-1.5 text-[10px] font-semibold text-white">{action.status === 'aprovada' ? 'Retomar execução' : 'Aprovar'}</button><button aria-label={`Rejeitar ação ${action.id}`} onClick={() => onDecision(action.id, 'rejeitar')} className="rounded-md border border-rose-300 px-3 py-1.5 text-[10px] font-semibold text-rose-800">Rejeitar</button></div>}
+      </article>;
+    })}</div> : <p className="rounded-lg border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400">Nenhuma ação ainda.</p>}
+    {audit.length > 0 && <details className="mt-4"><summary className="cursor-pointer text-xs font-semibold text-slate-600">Eventos de auditoria ({audit.length})</summary><ul className="mt-2 space-y-1">{[...audit].reverse().map(event => {
+      const consultation = event.kind === 'consulta' || legacyConsultationIds.has(event.actionId);
+      return <li key={event.id} className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500"><span className={`rounded px-1.5 py-0.5 font-semibold ${consultation ? 'bg-slate-100 text-slate-700' : 'bg-blue-50 text-blue-800'}`}>{consultation ? 'Consulta' : 'Ação'}</span><span>{event.ocorridaEm} • {event.evento} • {event.descricao}</span></li>;
+    })}</ul></details>}
+  </section>;
 }

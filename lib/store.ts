@@ -1,5 +1,6 @@
 import { transitionAction, type Action, type AuditRecord, type OrderState } from './actions';
-import { createHash } from 'node:crypto';
+import { isConsultationActionType } from './actions';
+import { createHash, randomUUID } from 'node:crypto';
 
 const PREFIX = 'gogroup:ops:demo:v1';
 const TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -132,9 +133,27 @@ export function getActionStore() {
 }
 
 export async function executeActionEffect(action: Action, store = getActionStore()) {
+  if (isConsultationActionType(action.tipo)) throw new Error('Consultas e simulações não podem ser executadas como Actions.');
   if (action.status !== 'aprovada') throw new Error('Somente ações aprovadas podem ser executadas.');
   const updated = transitionAction(action, 'executada', action.responsavel);
-  const state = action.tipo === 'reembolso' ? 'cancelado' : ['consulta_fila','comparacao','investigacao','comunicacao_cliente','simulacao'].includes(action.tipo) ? null : 'em_tratativa';
+  const state = action.tipo === 'reembolso' ? 'cancelado' : action.tipo === 'comunicacao_cliente' ? null : 'em_tratativa';
   await store.completeAction(updated, state);
   return updated;
+}
+
+export async function recordConsultation(store: ActionStore, input: { tool: string; summary: string; orderIds?: string[] }) {
+  const id = randomUUID();
+  const record: AuditRecord = {
+    id,
+    actionId: `consulta:${id}`,
+    evento: 'consultada',
+    kind: 'consulta',
+    tool: input.tool,
+    orderIds: input.orderIds,
+    responsavel: 'agente',
+    ocorridaEm: new Date().toISOString(),
+    descricao: input.summary,
+  };
+  await store.appendAudit(record);
+  return { id, kind: 'consulta' as const };
 }

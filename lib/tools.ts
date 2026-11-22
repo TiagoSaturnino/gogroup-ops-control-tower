@@ -3,9 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Order } from './engine';
 import { runEngine } from './engine';
-import type { Action, ActionType } from './actions';
+import { isConsultationActionType, type Action, type ActionType } from './actions';
 import { transitionAction } from './actions';
-import { executeActionEffect, getActionStore } from './store';
+import { executeActionEffect, getActionStore, recordConsultation } from './store';
 import { BUSINESS } from './params';
 
 export type Dataset = { orders: Order[]; routes?: unknown[] };
@@ -17,10 +17,21 @@ export function loadDataset(): Dataset {
 }
 
 export async function dashboard(dataset = loadDataset(), params: Parameters<typeof runEngine>[1] = {}, store = getActionStore()) {
-  const orderStates = await store.getOrderStates();
+  const [orderStates, actions, audit] = await Promise.all([store.getOrderStates(), store.listActions(), store.listAudit()]);
   const activeOrders = filterActiveOrders(dataset.orders, orderStates);
   const result = runEngine(activeOrders, { ...params, routes: dataset.routes as import('./engine').Route[] | undefined });
-  return { ...result, orderStates };
+  const autonomouslyProcessed = new Set(actions
+    .filter(action => action.tipo === 'zero_touch_aviso' && action.status === 'executada')
+    .flatMap(action => action.orderIds.filter(orderId => orderStates[orderId] === 'em_tratativa')));
+  return {
+    ...result,
+    orderStates,
+    agentMetrics: {
+      consultasAgente: audit.filter(record => record.kind === 'consulta').length + actions.filter(action => isConsultationActionType(action.tipo)).length,
+      acoesComEfeito: actions.filter(action => !isConsultationActionType(action.tipo)).length,
+      processadasAutonomamente: autonomouslyProcessed.size,
+    },
+  };
 }
 
 export function filterActiveOrders<T extends Order>(orders: T[], states: Record<string, import('./actions').OrderState>) {
@@ -80,6 +91,11 @@ export async function executeDeterministic(toolName: string, args: Record<string
     justification = `Simulação do motor determinístico para ${simulation.totals.pedidos} pedidos.`;
     actionExecuted = 'Simulação registrada.';
   } else return { error: `Ferramenta desconhecida: ${toolName}`, action: null };
+
+  if (type === 'simulacao') {
+    const consultation = await recordConsultation(store, { tool: toolName, summary: justification });
+    return { actionExecuted, affectedOrderIds: [], requiresHumanApproval: false, consultation, financialImpactBrl: impact, hoursSaved: 0 };
+  }
 
   const orderIds = rows.map(order => order.order_id).sort();
   const id = createHash('sha256').update(`${toolName}|${type}|${orderIds.join('|') || JSON.stringify(args)}`).digest('hex').slice(0, 24);

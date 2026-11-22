@@ -1,5 +1,7 @@
 export type ActionStatus = 'proposta' | 'aguardando_aprovacao' | 'aprovada' | 'rejeitada' | 'executada';
 export type ActionType = 'zero_touch_aviso' | 'reenvio' | 'reembolso' | 'chamado_transportadora' | 'bloqueio_lote' | 'resolver_pedido' | 'simulacao' | 'consulta_fila' | 'comparacao' | 'investigacao' | 'comunicacao_cliente' | 'escalonamento';
+const LEGACY_CONSULTATION_TYPES: ReadonlySet<ActionType> = new Set(['consulta_fila', 'comparacao', 'investigacao', 'simulacao']);
+export function isConsultationActionType(type: ActionType) { return LEGACY_CONSULTATION_TYPES.has(type); }
 export type Action = {
   id: string;
   orderIds: string[];
@@ -23,7 +25,10 @@ export type OrderState = 'aberto' | 'em_tratativa' | 'resolvido' | 'cancelado';
 export type AuditRecord = {
   id: string;
   actionId: string;
-  evento: 'criada' | 'aprovada' | 'rejeitada' | 'executada' | 'texto_corrigido' | 'demo_reiniciada';
+  evento: 'criada' | 'aprovada' | 'rejeitada' | 'executada' | 'texto_corrigido' | 'demo_reiniciada' | 'consultada';
+  kind?: 'consulta' | 'acao';
+  tool?: string;
+  orderIds?: string[];
   responsavel: 'agente' | 'humano';
   ocorridaEm: string;
   descricao: string;

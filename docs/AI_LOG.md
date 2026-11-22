@@ -63,3 +63,12 @@
 - **Verificação e resultado:** comparação na combinação data do pedido, valor, SKU, UF e transportadora encontrou zero colisões nos dois datasets. Histórico sem arquivos brutos/privados ou `.env*`, `git grep` sem padrões de segredo e dados sem campos de nome/email. `npm test` passou com 29 testes, lint e build passaram.
 - **Decisão sobre a licença:** conforme instrução do usuário, o titular foi alterado de GoGroup para Tiago Saturnino, mudando somente essa linha. Os commits de fixtures e licença foram enviados para `origin/main` sem force; o registro desta auditoria foi commitado separadamente.
 - **Lição:** a checagem precisa cobrir a história do Git e as combinações de dados, enquanto as exceções de teste devem ser estreitas, documentadas e exercitadas por teste.
+
+## 2026-11-21 — Tarefa H1: separar consultas de ações
+
+- **Pedido:** retirar consultas e simulações do ciclo de Actions, separar os KPIs, preservar o histórico legado sem classificá-lo como efeito e contar pedidos distintos processados por Zero-Touch.
+- **Problema → causa:** ferramentas de leitura chamavam a rotina que persistia e executava Actions; por isso consultas podiam inflar o KPI de ações e gerar eventos/status enganosos.
+- **Correção:** consultas e simulações agora gravam trilha `kind: consulta`; Actions com efeito permanecem no ciclo atual. O painel e a API classificam tipos de consulta antigos como consulta sem removê-los do store. O KPI autônomo deduplica IDs e exige Action Zero-Touch executada com pedido em `em_tratativa`.
+- **Decisão:** `comunicacao_cliente` permanece fora dos tipos de consulta para que a H2 possa representá-la como Action com efeito; no comportamento atual, ela não altera o estado do pedido.
+- **Erro corrigido no caminho:** o teste de histórico legado renderizado falhou porque Vitest não resolve o alias `@/`; o import do componente foi tornado relativo, mantendo a resolução compatível com Next. Uma asserção inicial também confundia o efeito simulado de Zero-Touch com cartões legados; ela passou a verificar somente os cartões de consulta.
+- **Validação:** consultas, simulações, mudança de estado por efeito aprovado/Zero-Touch, contagem distinta e renderização de Actions legadas foram cobertas por testes. O snapshot privado permaneceu sem alterações.
