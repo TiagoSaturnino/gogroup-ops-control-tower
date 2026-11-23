@@ -42,7 +42,7 @@
 
 ## 2026-11-21 — Tarefa E: defesa e métricas
 
-- **Pedido:** explicar solução e limites, calcular métricas do motor, sensibilidade, visão de implantação, pitch, sabatina e licença sem inventar números.
+- **Pedido:** explicar solução e limites, calcular métricas do motor, sensibilidade, visão de implantação e licença sem inventar números.
 - **Correção durante a tarefa:** os documentos recebidos estavam com sequências de mojibake e o log não estava cronológico; reescrevi o registro e alinhei números aos agregados reproduzíveis por `scripts/print_metrics.mjs`.
 - **Decisão:** horas são estimativas teóricas, ações autônomas não são chamadas resolvidas, e EV priorizado não é perda comprovadamente evitada. Marina é apresentada como persona representativa, não pessoa entrevistada. Sensibilidades são cenários, não fatos.
 - **Lição:** a defesa deve distinguir cálculo, efeito persistido e resultado operacional observado.

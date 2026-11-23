@@ -1,12 +1,45 @@
 # Torre de Controle AI-First — Operações GoGroup
 
-**Deploy:** [preencher com a URL pública]
+Uma torre de controle operacional que combina priorização determinística, ações auditáveis e aprovação humana quando necessária.
+
+**Demonstração pública:** https://gogroup-ops-control-tower.vercel.app
+
+## Demonstração
+
+Prints feitos neste ambiente, com dados fictícios do desafio. Nenhum dado bruto está no repositório e os IDs de pedido foram omitidos.
+
+### Painel web
+
+![Painel web com indicadores operacionais e fila priorizada após as ações](img/web-01-painel-kpis.png)
+
+Estado após executar o Zero-Touch e aprovar 3 ações; consultas do agente separadas de ações com efeito.
+
+### Agente no Telegram
+
+| Plano do dia | Cartões de aprovação |
+| --- | --- |
+| ![Mensagem do plano diário com fila, capacidade e Zero-Touch](img/telegram-01-plano-do-dia.jpg)<br>Plano do dia | ![Cartões do Telegram com opções, alçada e botões de aprovação](img/telegram-02-cartoes-de-aprovacao.jpg)<br>Cartões de aprovação |
+| ![Cartão de chamado da Rota Express aprovado, com IDs ocultos](img/telegram-03-chamado-rota-express-aprovado.jpg)<br>Chamado aprovado | ![Mensagens de comunicação por marca e confirmações de aprovação no Telegram](img/telegram-04-comunicacao-e-aprovacoes.jpg)<br>Comunicação por marca e aprovações |
+
+O Telegram é restrito à conta do autor; os prints mostram esse canal de demonstração.
+
+### Trilha e auditoria
+
+![Trilha com consultas, ações executadas e aprovações registradas](img/web-02-trilha-e-auditoria.png)
+
+Consultas (somente leitura) separadas de ações com efeito; cada aprovação humana fica registrada.
+
+### Como testar em 30 segundos
+
+1. Abra o [link público](https://gogroup-ops-control-tower.vercel.app).
+2. Clique em **Preparar lote Zero-Touch** e depois em uma ação de alçada para aprová-la.
+3. Veja a trilha e a auditoria.
+4. Use **Reiniciar demonstração** para voltar ao estado inicial.
 
 ## Em dois minutos
 
 **Para quem:** Marina é uma persona representativa: analista de operações de Gocase/GoBeauté, responsável por organizar exceções de pedidos com capacidade de referência de **150 tratativas por dia**. O problema demonstrado é uma fila de **2.000 pedidos** cuja prioridade e custo de atraso precisam ser avaliados com critério comum. Marina não é uma usuária real entrevistada; o fluxo da área precisa ser validado com a equipe.
 
-**Solução em uma frase:** um agente operacional interpreta o pedido da equipe, delega triagem, investigação e comunicação a especialistas, chama tools que agem no motor e no store e pede aprovação humana quando a ação excede sua alçada.
 
 ### Fluxo de referência e fluxo com agente
 
@@ -89,11 +122,10 @@ Com o snapshot privado local, `npm run metrics` usa essa fonte e imprime apenas 
 
 Nenhum dado bruto (CSV, PDF, ZIP) ou `.env*` deve entrar no Git. `data/raw/` e `data/private/` permanecem ignorados; o snapshot privado não está no repositório. A demo e a fixture são sintéticas. Não copie IDs, mensagens ou registros privados para `public/`, documentação ou logs.
 
-## Documentação para avaliação
+## Documentação do projeto
 
 - [Metodologia e fórmulas](docs/METODOLOGIA.md)
 - [Métricas, sensibilidade e limites](docs/METRICAS.md)
 - [Visão 360° e implantação](docs/VISAO_360.md)
-- [Pitch de cinco minutos](docs/PITCH.md)
-- [Perguntas da sabatina](docs/SABATINA.md)
 - [Telegram](docs/TELEGRAM.md)
+- [Registro de trabalho assistido por IA](docs/AI_LOG.md)
