@@ -57,6 +57,17 @@ O Telegram é opcional. Sem credenciais Groq, o agente usa o fallback determiní
 
 O agente não marca um pedido como resolvido só por preparar uma ação. O Zero-Touch o coloca em `em_tratativa`; a integração externa indicada na Action não é considerada executada sem confirmação do canal.
 
+### Comunicação
+
+O sub-agente de Comunicação faz uma chamada própria ao modelo para redigir a mensagem usando fatos do motor. O texto passa pelo validador; sem Groq ou se a validação falhar, é usado um template determinístico. Na comunicação individual, o rascunho fica registrado em uma Action `aguardando_aprovacao`; só após aprovação ele pode ser enviado, e apenas ao chat de demonstração do Telegram quando configurado. Rejeitar não envia a mensagem. No Zero-Touch sem alçada, a mensagem por marca é registrada na Action e na trilha de auditoria e segue sem aprovação individual; com Telegram configurado, é enviada ao chat de demonstração. Sem esse canal, o envio permanece simulado. Em nenhum desses fluxos o envio declara o pedido resolvido: seu estado interno é `em_tratativa`.
+
+### O que aprendemos
+
+- Prazo útil e deduplicação mudam a prioridade e o impacto calculado.
+- SKUs ligados a regras precisam ser preservados; os demais podem ser anonimizados.
+- Premissas sem fonte não devem virar números operacionais.
+- A trilha deve separar rascunho, aprovação, envio e estado do pedido.
+
 ## Rodar localmente sem dados privados
 
 Requisitos: Node.js e npm. Nenhuma chave Groq, Redis ou Telegram é necessária para abrir a demo.

@@ -35,10 +35,10 @@
 ## Slide 5 — Demo ao vivo
 
 - No chat de equipe, enviar `/plano` e ler fila, impacto estimado e plano.
-- Abrir um cartão de alçada e escolher **Ver detalhes**.
+- Abrir um cartão de alçada, conferir opções e rascunho de mensagem ao cliente.
 - Tocar em **Aprovar**; recarregar a interface web e conferir Action/auditoria.
 
-**Fala (~35 s):** “Vou começar no Telegram com o plano do dia. O bot usa o mesmo motor e o mesmo store da interface web. Depois abro um cartão de alçada para mostrar as opções calculadas, a recomendação e quem decide. Ao aprovar, o bot edita a mensagem; em seguida atualizo a página para conferir que a Action e a auditoria vieram do store, não de um estado temporário do navegador. Mensagens a cliente ficam no chat de demonstração.”
+**Fala (~35 s):** “Vou começar no Telegram com o plano do dia. O bot usa o mesmo motor e o mesmo store da interface web. No cartão, mostro as opções calculadas, quem decide e o rascunho de mensagem ao cliente. Ao aprovar, a mensagem segue apenas para o chat de demonstração; em seguida atualizo a página para conferir a Action e a trilha de auditoria no store.”
 
 **Transição para a demo:** “Até aqui vimos a decisão; agora vou seguir a evidência de ponta a ponta, do comando ao registro compartilhado.”
 
