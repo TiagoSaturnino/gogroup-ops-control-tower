@@ -13,7 +13,7 @@ type TelegramUpdate = { update_id: number; message?: TelegramMessage; callback_q
 const json = (body: Record<string, unknown>, status = 200) => NextResponse.json(body, { status });
 const markdown = (text: string) => sendTelegramMessage(getTelegramConfig()!.token, getTelegramConfig()!.teamChatId, text, { parse_mode: 'MarkdownV2' });
 const money = (value: number) => escapeMarkdownV2(`R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-const HELP = '*Comandos disponíveis*\n/plano — plano operacional do dia\n/fila [n] — pedidos ativos priorizados\n/pedido <id> — dossiê e opções\n/causas — sete causas-raiz com custo recorrente\n/aprovacoes — ações que aguardam decisão\n/ajuda — esta lista';
+const HELP = `*Comandos disponíveis*\n/plano — plano operacional do dia\n/fila ${escapeMarkdownV2('[n]')} — pedidos ativos priorizados\n/pedido <id> — dossiê e opções\n/causas — sete causas-raiz com custo recorrente\n/aprovacoes — ações que aguardam decisão\n/ajuda — esta lista`;
 
 function constantTimeEqual(left: string, right: string) {
   const a = Buffer.from(left), b = Buffer.from(right);
@@ -48,7 +48,7 @@ async function executeCommand(text: string, chatId: string) {
   if (command === '/plano') prompt = 'Monte o plano de hoje.';
   else if (command === '/fila') {
     const requested = argument ? Number(argument) : 10;
-    if (!Number.isInteger(requested) || requested < 1 || requested > 50) { await markdown('Uso: \/fila [n], com n entre 1 e 50.'); return; }
+    if (!Number.isInteger(requested) || requested < 1 || requested > 50) { await markdown('Uso: /fila ' + escapeMarkdownV2('[n]') + ', com n entre 1 e 50.'); return; }
     prompt = `Liste a fila ativa priorizada pelo motor, limite ${Math.min(requested, 50)}. Não execute ações.`;
   } else if (command === '/pedido') {
     if (!/^[A-Z]{2}-?[A-Z0-9-]{3,24}$/i.test(argument)) { await markdown('Uso: \/pedido <id>.'); return; }
@@ -142,7 +142,9 @@ export async function POST(request: Request) {
       else await executeCommand(update.message.text, chatId);
     }
     return json({ ok: true });
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('Falha ao processar update do Telegram:', message.split(config.token).join('[redacted]'));
     await store.releaseTelegramUpdate(updateId);
     return json({ error: 'Falha temporária ao processar o update. O Telegram pode tentar novamente.' }, 500);
   }

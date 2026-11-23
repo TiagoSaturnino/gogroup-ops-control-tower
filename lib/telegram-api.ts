@@ -18,17 +18,32 @@ async function telegramApi<T>(token: string, method: string, body: Record<string
   let response: Response;
   try { response = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000), cache: 'no-store' }); }
   catch { throw new Error('Não foi possível conectar à Bot API do Telegram.'); }
-  let payload: { ok?: boolean; result?: T };
+  let payload: { ok?: boolean; result?: T; error_code?: number; description?: string };
   try { payload = await response.json() as typeof payload; } catch { throw new Error('Resposta inválida da Bot API do Telegram.'); }
-  if (!response.ok || !payload.ok || payload.result === undefined) throw new Error('A Bot API do Telegram recusou a operação.');
+  if (!response.ok || !payload.ok || payload.result === undefined) { const code = payload.error_code ?? response.status; const description = (payload.description ?? 'Telegram Bot API request failed.').split(token).join('[redacted]'); console.error('Telegram Bot API error', { code, description }); throw new Error('Telegram Bot API request failed.'); }
   return payload.result;
 }
 
+function plainTelegramText(text: string) {
+  return text.replace(/\\([_*\[\]()~`>#+\-=|{}.!\\])/g, '$1').replace(/\*/g, '');
+}
+
+async function telegramMessage(token: string, method: 'sendMessage' | 'editMessageText', body: Record<string, unknown>, text: string, extra: Record<string, unknown>) {
+  const message = { ...body, text: text.slice(0, 4096), ...extra };
+  try { return await telegramApi<{ message_id: number }>(token, method, message); }
+  catch (error) {
+    if (extra.parse_mode !== 'MarkdownV2') throw error;
+    const plain: Record<string, unknown> = { ...message, text: plainTelegramText(text.slice(0, 4096)) };
+    delete plain.parse_mode;
+    return telegramApi<{ message_id: number }>(token, method, plain);
+  }
+}
+
 export async function sendTelegramMessage(token: string, chatId: string, text: string, extra: Record<string, unknown> = {}) {
-  return telegramApi<{ message_id: number }>(token, 'sendMessage', { chat_id: chatId, text: text.slice(0, 4096), ...extra });
+  return telegramMessage(token, 'sendMessage', { chat_id: chatId }, text, extra);
 }
 export async function editTelegramMessage(token: string, chatId: string, messageId: number, text: string, extra: Record<string, unknown> = {}) {
-  return telegramApi<{ message_id: number }>(token, 'editMessageText', { chat_id: chatId, message_id: messageId, text: text.slice(0, 4096), ...extra });
+  return telegramMessage(token, 'editMessageText', { chat_id: chatId, message_id: messageId }, text, extra);
 }
 export async function answerTelegramCallback(token: string, callbackQueryId: string, text: string) {
   return telegramApi<boolean>(token, 'answerCallbackQuery', { callback_query_id: callbackQueryId, text: text.slice(0, 180), show_alert: false });

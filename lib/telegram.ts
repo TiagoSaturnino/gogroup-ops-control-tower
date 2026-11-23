@@ -23,7 +23,7 @@ export async function formatActionApproval(action: Action) {
   const owner = String(val(action, 'decisor') ?? 'Responsável operacional');
   const orderList = action.orderIds.slice(0, 25).map(escapeMarkdownV2).join(', ') || 'sem pedido associado';
   const draft = action.rascunho ? `\n*Rascunho para aprova\u00e7\u00e3o:*\n${escapeMarkdownV2(action.rascunho)}` : '';
-  return `*Aprovação pendente*\n*Pedido(s):* ${orderList}\n*Exceção:* ${escapeMarkdownV2(exceptions.join(', ') || action.tipo)}\n*Opções comparadas:*\n${options}\n*Recomendação:* ${escapeMarkdownV2(recommendation)}\n*Responsável:* ${escapeMarkdownV2(owner)}\n*Justificativa:* ${escapeMarkdownV2(action.justificativa)}${draft}`;
+  return `*Aprovação pendente*\n*Pedido${escapeMarkdownV2('(s)')}:* ${orderList}\n*Exceção:* ${escapeMarkdownV2(exceptions.join(', ') || action.tipo)}\n*Opções comparadas:*\n${options}\n*Recomendação:* ${escapeMarkdownV2(recommendation)}\n*Responsável:* ${escapeMarkdownV2(owner)}\n*Justificativa:* ${escapeMarkdownV2(action.justificativa)}${draft}`;
 }
 
 export async function notifyPendingTelegramActions(actions: Action[]) {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { escapeMarkdownV2 } from '../lib/telegram';
 import { notifyPendingTelegramActions } from '../lib/telegram';
-import { sendZeroTouchTelegram } from '../lib/telegram-api';
+import { editTelegramMessage, sendTelegramMessage, sendZeroTouchTelegram } from '../lib/telegram-api';
 import { MemoryActionStore, type ActionStore } from '../lib/store';
 import type { Action } from '../lib/actions';
 import { runAgentTool } from '../lib/agent/tools';
@@ -20,6 +20,51 @@ afterEach(() => {
 describe('integração Telegram', () => {
   it('escapa os caracteres especiais de MarkdownV2', () => {
     expect(escapeMarkdownV2('pedido_1 [x]. R$ 10,00!')).toBe('pedido\\_1 \\[x\\]\\. R$ 10,00\\!');
+  });
+
+  it('refaz sendMessage como texto simples após erro MarkdownV2 e preserva os botões', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    globalThis.fetch = vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push(body);
+      return calls.length === 1
+        ? Response.json({ ok: false, error_code: 400, description: "Bad Request: can't parse entities" }, { status: 400 })
+        : Response.json({ ok: true, result: { message_id: 5 } });
+    }) as typeof fetch;
+    const replyMarkup = { inline_keyboard: [[{ text: 'Aprovar', callback_data: 'approve' }]] };
+    await sendTelegramMessage('test-token', '42', '*Pedido\\(s\\):* GC\\_1', { parse_mode: 'MarkdownV2', reply_markup: replyMarkup });
+    expect(calls).toHaveLength(2);
+    expect(calls[0].parse_mode).toBe('MarkdownV2');
+    expect(calls[1]).not.toHaveProperty('parse_mode');
+    expect(calls[1].text).toBe('Pedido(s): GC_1');
+    expect(calls[1].reply_markup).toEqual(replyMarkup);
+    expect(log).toHaveBeenCalledWith('Telegram Bot API error', { code: 400, description: "Bad Request: can't parse entities" });
+  });
+
+  it('refaz editMessageText sem parse_mode e não repete quando a chamada inicial funciona', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    globalThis.fetch = vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      calls.push(body);
+      return calls.length === 1
+        ? Response.json({ ok: false, error_code: 400, description: 'Bad Request: can\'t parse entities' }, { status: 400 })
+        : Response.json({ ok: true, result: { message_id: 7 } });
+    }) as typeof fetch;
+    await editTelegramMessage('test-token', '42', 7, '*Atualizado\\.*', { parse_mode: 'MarkdownV2', disable_web_page_preview: true });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].text).toBe('Atualizado.');
+    expect(calls[1]).not.toHaveProperty('parse_mode');
+    expect(calls[1].disable_web_page_preview).toBe(true);
+
+    calls.length = 0;
+    globalThis.fetch = vi.fn(async (_input, init) => {
+      calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return Response.json({ ok: true, result: { message_id: 8 } });
+    }) as typeof fetch;
+    await sendTelegramMessage('test-token', '42', '*Ok*', { parse_mode: 'MarkdownV2' });
+    expect(calls).toHaveLength(1);
   });
 
   it('mantém updates e operações idempotentes no store de memória', async () => {
