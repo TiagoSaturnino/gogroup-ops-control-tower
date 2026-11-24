@@ -10,7 +10,7 @@ Prints feitos neste ambiente, com dados fictícios do desafio. Nenhum dado bruto
 
 ### Painel web
 
-![Painel web com indicadores operacionais e fila priorizada após as ações](img/web-01-painel-kpis.png)
+![Painel web com indicadores operacionais e fila priorizada após as ações](docs/img/web-01-painel-kpis.png)
 
 Estado após executar o Zero-Touch e aprovar 3 ações; consultas do agente separadas de ações com efeito.
 
@@ -18,14 +18,14 @@ Estado após executar o Zero-Touch e aprovar 3 ações; consultas do agente sepa
 
 | Plano do dia | Cartões de aprovação |
 | --- | --- |
-| ![Mensagem do plano diário com fila, capacidade e Zero-Touch](img/telegram-01-plano-do-dia.jpg)<br>Plano do dia | ![Cartões do Telegram com opções, alçada e botões de aprovação](img/telegram-02-cartoes-de-aprovacao.jpg)<br>Cartões de aprovação |
-| ![Cartão de chamado da Rota Express aprovado, com IDs ocultos](img/telegram-03-chamado-rota-express-aprovado.jpg)<br>Chamado aprovado | ![Mensagens de comunicação por marca e confirmações de aprovação no Telegram](img/telegram-04-comunicacao-e-aprovacoes.jpg)<br>Comunicação por marca e aprovações |
+| ![Mensagem do plano diário com fila, capacidade e Zero-Touch](docs/img/telegram-01-plano-do-dia.jpg)<br>Plano do dia | ![Cartões do Telegram com opções, alçada e botões de aprovação](docs/img/telegram-02-cartoes-de-aprovacao.jpg)<br>Cartões de aprovação |
+| ![Cartão de chamado da Rota Express aprovado, com IDs ocultos](docs/img/telegram-03-chamado-rota-express-aprovado.jpg)<br>Chamado aprovado | ![Mensagens de comunicação por marca e confirmações de aprovação no Telegram](docs/img/telegram-04-comunicacao-e-aprovacoes.jpg)<br>Comunicação por marca e aprovações |
 
 O Telegram é restrito à conta do autor; os prints mostram esse canal de demonstração.
 
 ### Trilha e auditoria
 
-![Trilha com consultas, ações executadas e aprovações registradas](img/web-02-trilha-e-auditoria.png)
+![Trilha com consultas, ações executadas e aprovações registradas](docs/img/web-02-trilha-e-auditoria.png)
 
 Consultas (somente leitura) separadas de ações com efeito; cada aprovação humana fica registrada.
 
