@@ -1,6 +1,6 @@
 # Torre de Controle AI-First — Operações GoGroup
 
-Uma ferramenta para equipes de Operações priorizarem exceções de pedidos, agir dentro de alçadas e registrar decisões.
+Um colega agente de Operações que prioriza 2.000 pedidos em exceção, atua sozinho no que está dentro da alçada e chama a pessoa certa quando precisa de decisão.
 
 **Demonstração pública:** https://gogroup-ops-control-tower.vercel.app
 
@@ -16,6 +16,14 @@ Uma ferramenta para equipes de Operações priorizarem exceções de pedidos, ag
 - **Problema modelado:** priorizar e tratar uma fila de exceções de pedidos com uma regra comum de risco e capacidade.
 - **Usuária de referência:** Marina, persona de apresentação de uma analista de Operações; não é uma pessoa entrevistada.
 - **Limite da hipótese:** o processo da GoGroup e as políticas de alçada ainda precisam ser validados com a equipe.
+
+## O que os dados revelaram
+
+- O snapshot de referência usado pelo motor contém 2.000 pedidos.
+- No checkout, a promessa de entrega comparava dias corridos com dias úteis; o cálculo considera os feriados de 07/09 e 12/10.
+- As regras identificam ocorrências no CD2 no turno da noite associadas a itens faltantes e brindes, além de falhas de personalização na IMP-02.
+- Também identificam ocorrências da Rota Express no Nordeste e o vazamento do lote L2607-B associado ao SKU APC-1067.
+- Avarias da Carga Norte em Lescent e rupturas pós-venda de Kokeshi completam as sete regras de causa-raiz do motor.
 
 ## O que o agente faz sozinho × onde chama um humano
 
@@ -52,7 +60,7 @@ flowchart LR
   R --> U
 ```
 
-Consultas somente leitura são registradas sem criar Action com efeito. O estado interno só muda quando a ação prevê essa transição; uma Action de comunicação individual, por exemplo, não muda o estado do pedido. No GitHub, blocos Markdown cercados com o identificador `mermaid` são renderizados como diagramas.
+Consultas somente leitura são registradas sem criar Action com efeito. O estado interno só muda quando a ação prevê essa transição; uma Action de comunicação individual, por exemplo, não muda o estado do pedido.
 
 ## Resultados do motor
 
@@ -69,6 +77,8 @@ Consultas somente leitura são registradas sem criar Action com efeito. O estado
 | Impacto estimado | Incremento de EV_Risco priorizado no Dia 1 | R$ 14.707,98 |
 
 São estimativas do motor calculadas sobre a cópia local privada do snapshot de referência; o clone público usa fixture sintética e pode mostrar outros totais. EV_Risco priorizado não é dinheiro recuperado nem perda evitada. As horas são teóricas (12 minutos por caso); a base não registra desfechos reais das tratativas.
+
+Em linguagem simples: no Dia 1, a prioridade põe R$ 22.998,23 de risco estimado sob tratamento, contra R$ 8.290,25 no FIFO; isso não significa perda evitada.
 
 ## Demonstração
 
@@ -119,7 +129,7 @@ Executar uma Action não prova que o problema externo foi solucionado. O pedido 
 
 ## Como usei IA no desenvolvimento
 
-- Usei Codex como principal ferramenta de apoio para implementar, revisar e documentar o projeto.
+- Usei Codex para implementar e outra IA (Claude) como parceira de análise e planejamento; as decisões e correções foram minhas.
 - Quando a leitura inicial de contexto foi parcial, pedi evidências concretas antes de aceitar conclusões.
 - Corrigi a hipótese de prazo em dias corridos e duplicatas, preservei SKUs necessários às regras e descartei uma probabilidade de ruptura sem fonte.
 - Registrei erros, correções e aprendizados em [docs/AI_LOG.md](docs/AI_LOG.md).
@@ -128,7 +138,7 @@ Executar uma Action não prova que o problema externo foi solucionado. O pedido 
 
 - Conectar ERP, WMS, pagamento, transportadoras e WhatsApp somente após validação de acesso e alçadas.
 - Registrar desfechos observados para medir resolução e resultado; hoje a base não os contém.
-- Validar as regras determinísticas atuais de causa-raiz e avaliar detecção baseada em dados operacionais adequados.
+- As sete causas usam regras calibradas neste dataset; o próximo passo é um detector estatístico por dimensão (CD, lote, transportadora, UF, turno).
 - Validar fila, política de contato, premissas e responsáveis com a equipe de Operações.
 - Proponho um piloto em sombra de 30 dias para comparar recomendações, decisões e desfechos antes de habilitar escrita externa.
 
@@ -144,6 +154,8 @@ npm run dev
 Abra `http://localhost:3000`. Sem `data/private/snapshot_2000.json`, o motor carrega `data/demo_fallback.json`. Para métricas da demo sintética, rode `npm run metrics -- --demo`.
 
 Para validar mudanças, rode `npm test`, `npm run lint` e `npm run build`.
+
+`npm test` tem 42 testes. O workflow `.github/workflows/ci.yml` executa lint, testes e build em pushes e pull requests.
 
 ### Variáveis opcionais
 
