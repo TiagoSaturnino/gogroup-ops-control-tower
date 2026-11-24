@@ -1,8 +1,74 @@
 # Torre de Controle AI-First — Operações GoGroup
 
-Uma torre de controle operacional que combina priorização determinística, ações auditáveis e aprovação humana quando necessária.
+Uma ferramenta para equipes de Operações priorizarem exceções de pedidos, agir dentro de alçadas e registrar decisões.
 
 **Demonstração pública:** https://gogroup-ops-control-tower.vercel.app
+
+## Como testar em 30 segundos
+
+1. Abra o [link público](https://gogroup-ops-control-tower.vercel.app).
+2. Clique em **Preparar lote Zero-Touch** e depois em uma ação pendente de alçada para aprová-la.
+3. Confira a trilha e a auditoria.
+4. Clique em **Reiniciar demonstração** para restaurar o estado compartilhado para todos os visitantes.
+
+## O problema e a usuária
+
+- **Problema modelado:** priorizar e tratar uma fila de exceções de pedidos com uma regra comum de risco e capacidade.
+- **Usuária de referência:** Marina, persona de apresentação de uma analista de Operações; não é uma pessoa entrevistada.
+- **Limite da hipótese:** o processo da GoGroup e as políticas de alçada ainda precisam ser validados com a equipe.
+
+## O que o agente faz sozinho × onde chama um humano
+
+| Situação | Comportamento atual |
+| --- | --- |
+| Zero-Touch sem alçada | Executa os casos elegíveis definidos pelo motor e registra o estado interno `em_tratativa`. O aviso é simulado sem Telegram; com Telegram configurado, vai ao chat de demonstração. |
+| Comunicação individual | O sub-agente chama o modelo com fatos do motor e valida o rascunho (ou usa template determinístico); a Action aguarda aprovação. Só envia após aprovação ao chat de demonstração configurado; rejeitar não envia. |
+| Mensagem do lote Zero-Touch | Agrupa mensagens por marca, registra texto e pedidos na Action/trilha e envia ao chat de demonstração sem aprovação individual, se o Telegram estiver configurado. |
+| Chamado à transportadora | Registra um chamado simulado como Action pendente de aprovação; não chama o sistema da transportadora. |
+| VIP, valor acima de R$ 250 ou ruptura pós-venda | O motor exige alçada humana. R$ 250 é uma premissa editável, não um limite informado como dado real da GoGroup. |
+
+## Fluxo de uma solicitação
+
+Com Groq, o Orquestrador percorre um loop limitado de ferramentas e as roteia para Triagem, Investigador ou Comunicação. Comunicação faz uma chamada própria ao modelo; sem chave Groq, os fluxos previstos usam o fallback determinístico.
+
+```mermaid
+flowchart LR
+  C["Comando: web ou Telegram"] --> O["Orquestrador"]
+  O --> T["Tools"]
+  T --> M["Motor determinístico em TypeScript"]
+  M --> Q{"Leitura ou ação?"}
+  Q -- "Leitura" --> U["Auditoria"]
+  Q -- "Ação" --> A["Action registrada"]
+  A --> G{"Exige alçada?"}
+  G -- "Não" --> Z["Zero-Touch"]
+  Z --> S["em_tratativa"]
+  S --> U["Auditoria"]
+  G -- "Sim" --> H["Aguarda aprovação humana"]
+  H --> D{"Decisão humana"}
+  D -- "Aprovar" --> E["Executa Action"]
+  E --> X["Estado interno conforme a ação"]
+  X --> U
+  D -- "Rejeitar" --> R["Action rejeitada"]
+  R --> U
+```
+
+Consultas somente leitura são registradas sem criar Action com efeito. O estado interno só muda quando a ação prevê essa transição; uma Action de comunicação individual, por exemplo, não muda o estado do pedido. No GitHub, blocos Markdown cercados com o identificador `mermaid` são renderizados como diagramas.
+
+## Resultados do motor
+
+| Tipo | Indicador | Resultado de referência |
+| --- | --- | ---: |
+| Processo | Pedidos únicos | 2.000 |
+| Processo | Zero-Touch elegível sem alçada humana | 327 (16,35% da fila) |
+| Processo | Horas teóricas poupadas pelos casos autônomos | 65,4 h |
+| Processo | Dias para processar a fila a 150/dia: FIFO e prioridade | 14 dias em ambos |
+| Impacto estimado | GMV na fila | R$ 220.161,37 |
+| Impacto estimado | EV_Risco total | R$ 97.456,36 |
+| Impacto estimado | EV_Risco no Dia 1: FIFO | R$ 8.290,25 |
+| Impacto estimado | EV_Risco no Dia 1: prioridade por EV_Risco | R$ 22.998,23 |
+| Impacto estimado | Incremento de EV_Risco priorizado no Dia 1 | R$ 14.707,98 |
+
+São estimativas do motor calculadas sobre a cópia local privada do snapshot de referência; o clone público usa fixture sintética e pode mostrar outros totais. EV_Risco priorizado não é dinheiro recuperado nem perda evitada. As horas são teóricas (12 minutos por caso); a base não registra desfechos reais das tratativas.
 
 ## Demonstração
 
@@ -21,7 +87,7 @@ Estado após executar o Zero-Touch e aprovar 3 ações; consultas do agente sepa
 | ![Mensagem do plano diário com fila, capacidade e Zero-Touch](docs/img/telegram-01-plano-do-dia.jpg)<br>Plano do dia | ![Cartões do Telegram com opções, alçada e botões de aprovação](docs/img/telegram-02-cartoes-de-aprovacao.jpg)<br>Cartões de aprovação |
 | ![Cartão de chamado da Rota Express aprovado, com IDs ocultos](docs/img/telegram-03-chamado-rota-express-aprovado.jpg)<br>Chamado aprovado | ![Mensagens de comunicação por marca e confirmações de aprovação no Telegram](docs/img/telegram-04-comunicacao-e-aprovacoes.jpg)<br>Comunicação por marca e aprovações |
 
-O Telegram é restrito à conta do autor; os prints mostram esse canal de demonstração.
+O webhook do Telegram aceita apenas os chats autorizados pela configuração; os prints mostram o chat configurado para demonstração.
 
 ### Trilha e auditoria
 
@@ -29,102 +95,68 @@ O Telegram é restrito à conta do autor; os prints mostram esse canal de demons
 
 Consultas (somente leitura) separadas de ações com efeito; cada aprovação humana fica registrada.
 
-### Como testar em 30 segundos
+## O que é real × o que é simulado
 
-1. Abra o [link público](https://gogroup-ops-control-tower.vercel.app).
-2. Clique em **Preparar lote Zero-Touch** e depois em uma ação de alçada para aprová-la.
-3. Veja a trilha e a auditoria.
-4. Use **Reiniciar demonstração** para voltar ao estado inicial.
-
-## Em dois minutos
-
-**Para quem:** Marina é uma persona representativa: analista de operações de Gocase/GoBeauté, responsável por organizar exceções de pedidos com capacidade de referência de **150 tratativas por dia**. O problema demonstrado é uma fila de **2.000 pedidos** cuja prioridade e custo de atraso precisam ser avaliados com critério comum. Marina não é uma usuária real entrevistada; o fluxo da área precisa ser validado com a equipe.
-
-
-### Fluxo de referência e fluxo com agente
-
-O fluxo manual abaixo é a hipótese operacional representada pela prova de conceito, não um processo observado dentro da GoGroup.
-
-| Referência manual | Com agente |
+| Parte | Estado atual |
 | --- | --- |
-| 1. Receber exceções de pedidos em uma fila. | 1. Receber comandos na interface ou no Telegram autorizado. |
-| 2. Conferir atraso, pagamento, rota ou produto pedido a pedido. | 2. Triar a fila pela prioridade determinística `EV_Risco`. |
-| 3. Estimar impacto e decidir a próxima ação. | 3. Investigar causas, comparar opções e executar apenas Zero-Touch sem alçada. |
-| 4. Contatar áreas e acompanhar aprovações manualmente. | 4. Persistir Actions/auditoria e encaminhar exceções às pessoas responsáveis. |
+| Custos, EV_Risco, prazos úteis, capacidade e fila | Calculados deterministicamente pelo motor TypeScript. |
+| Actions, estados e auditoria | No Upstash quando configurado; sem ele, na memória do processo, que não compartilha estado entre instâncias. |
+| Aprovação humana | A decisão é persistida no store e pode ser feita na web ou nos botões do Telegram autorizado. |
+| Zero-Touch e avisos | O efeito interno é registrado; o envio externo é simulado sem Telegram e, quando configurado, enviado somente ao chat de demonstração. |
+| Comunicação individual | Rascunho registrado e pendente; envio ao chat demo somente após aprovação. Rejeição não envia. |
+| Chamados e integrações externas | Chamado de transportadora é simulado e pendente; ERP, WMS, pagamento, transportadoras e WhatsApp Business não estão conectados. |
+| Groq | Opcional para seleção de ferramentas e redação; o fallback determinístico funciona sem chave. O modelo não calcula valores nem prazos. |
 
-## Números da execução do motor
+Executar uma Action não prova que o problema externo foi solucionado. O pedido não é marcado como resolvido apenas por uma mensagem ou aprovação.
 
-Os resultados abaixo foram impressos por `scripts/print_metrics.mjs` usando a cópia local do snapshot privado de referência. Nenhum registro do snapshot foi copiado para este repositório. Sem esse arquivo, o clone usa a demonstração sintética, com resultados diferentes.
+## Decisões e trade-offs
 
-| Indicador calculado | Resultado |
-| --- | ---: |
-| Pedidos únicos na entrada do motor | 2.000 |
-| GMV na fila | R$ 220.161,37 |
-| EV_Risco total estimado | R$ 97.456,36 |
-| EV_Risco no Dia 1: FIFO | R$ 8.290,25 |
-| EV_Risco no Dia 1: prioridade por EV_Risco | R$ 22.998,23 |
-| Incremento de EV_Risco priorizado no Dia 1 | R$ 14.707,98 |
-| Zero-Touch elegível sem alçada humana | 327 (16,35% da fila) |
-| Horas teóricas poupadas pelos casos autônomos | 65,4 h |
-| Dias para processar a fila a 150/dia: FIFO e prioridade | 14 dias em ambos |
+- Mantive o motor TypeScript como única fonte de dinheiro, risco, prazo e alçada; o LLM escolhe ferramentas e redige texto.
+- Mantive um fallback determinístico para os fluxos operacionais quando Groq está indisponível ou sem chave.
+- Exijo aprovação humana para comunicação individual, chamados e casos que excedem alçada; Zero-Touch atua só nos casos elegíveis sem alçada.
+- Rotulei dados oficiais e premissas editáveis para deixar claro o que precisa de validação.
+- Separei consultas somente leitura de Actions com efeito para não contar análise como execução.
 
-EV_Risco priorizado é uma estimativa do motor e não dinheiro recuperado nem perda observada como evitada. As horas são estimadas a partir dos casos elegíveis e dos 12 minutos por caso do enunciado. O desfecho real das tratativas não está na base.
+## Como usei IA no desenvolvimento
 
-## Como experimentar sem login
+- Usei Codex como principal ferramenta de apoio para implementar, revisar e documentar o projeto.
+- Quando a leitura inicial de contexto foi parcial, pedi evidências concretas antes de aceitar conclusões.
+- Corrigi a hipótese de prazo em dias corridos e duplicatas, preservei SKUs necessários às regras e descartei uma probabilidade de ruptura sem fonte.
+- Registrei erros, correções e aprendizados em [docs/AI_LOG.md](docs/AI_LOG.md).
 
-Abra a URL pública do deploy e use o painel **Agente**, sem criar conta. Exemplos: “Monte o plano de hoje”, “Investigue a Rota Express no Nordeste”, “O que fazer com o lote L2607-B?” e “Resolva o pedido `<id>`”. Os botões de aprovação persistem a decisão no store configurado.
+## Limites e próximos passos
 
-O Telegram é opcional. Sem credenciais Groq, o agente usa o fallback determinístico. Para configurar o bot e o briefing, siga [docs/TELEGRAM.md](docs/TELEGRAM.md).
+- Conectar ERP, WMS, pagamento, transportadoras e WhatsApp somente após validação de acesso e alçadas.
+- Registrar desfechos observados para medir resolução e resultado; hoje a base não os contém.
+- Validar as regras determinísticas atuais de causa-raiz e avaliar detecção baseada em dados operacionais adequados.
+- Validar fila, política de contato, premissas e responsáveis com a equipe de Operações.
+- Proponho um piloto em sombra de 30 dias para comparar recomendações, decisões e desfechos antes de habilitar escrita externa.
 
-## O que é real × o que é simulado hoje
+## Rodar localmente
 
-| Fluxo | Estado atual |
-| --- | --- |
-| Cálculo de custos, EV_Risco, prazos úteis, capacidade e fila | **Real e determinístico** no motor TypeScript. |
-| Ações, estados internos e auditoria | **Persistidos** no Upstash quando configurado; senão, na memória do processo. Memória não compartilha estado entre instâncias de produção. |
-| Aprovação humana | **Real e persistida** no store; pode ser feita na web ou no cartão do Telegram. |
-| Zero-Touch na web sem Telegram | Estado interno `em_tratativa` persiste; envio ao cliente é **simulado**. |
-| Telegram de demonstração configurado | Avisos são **enviados** ao chat de demonstração; a Action registra o efeito real nesse canal. Não são mensagens a clientes reais. |
-| WhatsApp Business, ERP, WMS, gateway de pagamento e painel de transportadora | **Roadmap/simulados**; ainda não há chamadas a esses sistemas. |
-| LLM Groq | Escolhe tools e redige texto; é **opcional**. Nunca calcula valores ou prazos. |
-
-O agente não marca um pedido como resolvido só por preparar uma ação. O Zero-Touch o coloca em `em_tratativa`; a integração externa indicada na Action não é considerada executada sem confirmação do canal.
-
-### Comunicação
-
-O sub-agente de Comunicação faz uma chamada própria ao modelo para redigir a mensagem usando fatos do motor. O texto passa pelo validador; sem Groq ou se a validação falhar, é usado um template determinístico. Na comunicação individual, o rascunho fica registrado em uma Action `aguardando_aprovacao`; só após aprovação ele pode ser enviado, e apenas ao chat de demonstração do Telegram quando configurado. Rejeitar não envia a mensagem. No Zero-Touch sem alçada, a mensagem por marca é registrada na Action e na trilha de auditoria e segue sem aprovação individual; com Telegram configurado, é enviada ao chat de demonstração. Sem esse canal, o envio permanece simulado. Em nenhum desses fluxos o envio declara o pedido resolvido: seu estado interno é `em_tratativa`.
-
-### O que aprendemos
-
-- Prazo útil e deduplicação mudam a prioridade e o impacto calculado.
-- SKUs ligados a regras precisam ser preservados; os demais podem ser anonimizados.
-- Premissas sem fonte não devem virar números operacionais.
-- A trilha deve separar rascunho, aprovação, envio e estado do pedido.
-
-## Rodar localmente sem dados privados
-
-Requisitos: Node.js e npm. Nenhuma chave Groq, Redis ou Telegram é necessária para abrir a demo.
+Requisitos: Node.js e npm. Sem variáveis externas, a aplicação usa a demonstração sintética.
 
 ```sh
 npm install
 npm run dev
 ```
 
-Abra `http://localhost:3000`. Sem `data/private/snapshot_2000.json`, o projeto carrega `data/demo_fallback.json`. Para imprimir os totais do motor sobre a demo sintética:
+Abra `http://localhost:3000`. Sem `data/private/snapshot_2000.json`, o motor carrega `data/demo_fallback.json`. Para métricas da demo sintética, rode `npm run metrics -- --demo`.
 
-```sh
-npm run metrics -- --demo
-```
+Para validar mudanças, rode `npm test`, `npm run lint` e `npm run build`.
 
-Com o snapshot privado local, `npm run metrics` usa essa fonte e imprime apenas agregados do motor. Para testes e build: `npm test`, `npm run lint` e `npm run build`.
+### Variáveis opcionais
 
-## Privacidade
+- `GROQ_API_KEY`: habilita seleção de ferramentas pelo Groq; sem chave, usa fallback determinístico.
+- `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN`: store compartilhado; sem eles, o estado fica na memória do processo.
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_TEAM_CHAT_ID` e `TELEGRAM_DEMO_CUSTOMER_CHAT_ID`: webhook, aprovações e chat privado de demonstração. Veja [docs/TELEGRAM.md](docs/TELEGRAM.md).
+- `CRON_SECRET`: protege o endpoint de briefing agendado.
 
-Nenhum dado bruto (CSV, PDF, ZIP) ou `.env*` deve entrar no Git. `data/raw/` e `data/private/` permanecem ignorados; o snapshot privado não está no repositório. A demo e a fixture são sintéticas. Não copie IDs, mensagens ou registros privados para `public/`, documentação ou logs.
+### Privacidade e documentação
 
-## Documentação do projeto
+Não versiono CSVs, PDFs, ZIPs, `.env*`, arquivos de `data/raw/` ou o snapshot privado em `data/private/`. Os prints e a fixture pública usam dados fictícios; não inclua registros ou identificadores privados no repositório.
 
-- [Metodologia e fórmulas](docs/METODOLOGIA.md)
+- [Metodologia e parâmetros](docs/METODOLOGIA.md)
 - [Métricas, sensibilidade e limites](docs/METRICAS.md)
 - [Visão 360° e implantação](docs/VISAO_360.md)
 - [Telegram](docs/TELEGRAM.md)
